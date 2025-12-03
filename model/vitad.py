@@ -387,13 +387,14 @@ def de_vit_base_patch16_clip_224(pretrained=False, **kwargs):
 
 # ========== ViTAD ==========
 class ViTAD(nn.Module):
-	def __init__(self, model_t, model_f, model_s):
+	def __init__(self, model_t, model_f, model_s, k_scales=None):
 		super(ViTAD, self).__init__()
 		self.net_t = get_model(model_t)
 		self.net_fusion = get_model(model_f)
 		self.net_s = get_model(model_s)
 
 		self.frozen_layers = ['net_t']
+		self.k_scales = k_scales
 
 	def freeze_layer(self, module):
 		module.eval()
@@ -414,6 +415,14 @@ class ViTAD(nn.Module):
 		feats_t = [f.detach() for f in feats_t]
 		feats_n = [f.detach() for f in feats_n]
 		feats_s = self.net_s(self.net_fusion(feats_n))
+		feats_t = [
+			torch.sigmoid(self.k_scales[i] * feats_t[i]) 
+			for i in range(len(feats_t))
+		]
+		feats_s = [
+			torch.sigmoid(self.k_scales[i] * feats_s[i]) 
+			for i in range(len(feats_s))
+		]
 		return feats_t, feats_s
 
 

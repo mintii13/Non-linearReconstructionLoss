@@ -1,0 +1,23 @@
+*/__pycache__/*
+*pyc
+.vscode/
+
+experiments/*
+
+.venv/*
+
+*.png
+
+.history
+# PyTorch
+*.pth
+*.pth.tar
+
+# Training outputs
+checkpoints/
+log/
+logs/
+result_*/
+vis_*/
+runs/
+wandb/

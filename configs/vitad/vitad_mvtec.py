@@ -12,13 +12,13 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		cfg_common.__init__(self)
 		cfg_dataset_default.__init__(self)
 		cfg_model_vitad.__init__(self)
-
+		self.k_scales = [42.03, 33.96, 22.41]
 		self.seed = 42
 		self.size = 256
-		self.epoch_full = 100
+		self.epoch_full = 300
 		self.warmup_epochs = 0
-		self.test_start_epoch = self.epoch_full
-		self.test_per_epoch = self.epoch_full // 10
+		self.test_start_epoch = 100
+		self.test_per_epoch = 300
 		self.batch_train = 8
 		self.batch_test_per = 8
 		self.lr = 1e-4 * self.batch_train / 8
@@ -27,8 +27,8 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 			'mAUROC_sp_max', 'mAP_sp_max', 'mF1_max_sp_max',
 			'mAUPRO_px',
 			'mAUROC_px', 'mAP_px', 'mF1_max_px',
-			'mF1_px_0.2_0.8_0.1', 'mAcc_px_0.2_0.8_0.1', 'mIoU_px_0.2_0.8_0.1',
-			'mIoU_max_px',
+			# 'mF1_px_0.2_0.8_0.1', 'mAcc_px_0.2_0.8_0.1', 'mIoU_px_0.2_0.8_0.1',
+			# 'mIoU_max_px',
 		]
 
 		# ==> data
@@ -64,7 +64,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		self.model = Namespace()
 		self.model.name = 'vitad'
 		self.model.kwargs = dict(pretrained=False, checkpoint_path='', strict=True, model_t=self.model_t,
-								 model_f=self.model_f, model_s=self.model_s)
+								 model_f=self.model_f, model_s=self.model_s, k_scales=self.k_scales)
 
 		# ==> evaluator
 		self.evaluator.kwargs = dict(metrics=self.metrics, pooling_ks=[16, 16], max_step_aupro=100)
@@ -91,7 +91,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 
 		# ==> loss
 		self.loss.loss_terms = [
-			dict(type='CosLoss', name='cos', avg=False, lam=1.0),
+			dict(type='L2Loss', name='pixel', lam=1.0),
 		]
 
 		# ==> logging
@@ -100,9 +100,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 			dict(name='data_t', fmt=':>5.3f'),
 			dict(name='optim_t', fmt=':>5.3f'),
 			dict(name='lr', fmt=':>7.6f'),
-			dict(name='cos', suffixes=[''], fmt=':>5.3f', add_name='avg'),
+			dict(name='pixel', suffixes=[''], fmt=':>5.3f', add_name='avg'),
 		]
 		self.logging.log_terms_test = [
 			dict(name='batch_t', fmt=':>5.3f', add_name='avg'),
-			dict(name='cos', suffixes=[''], fmt=':>5.3f', add_name='avg'),
+			dict(name='pixel', suffixes=[''], fmt=':>5.3f', add_name='avg'),
 		]

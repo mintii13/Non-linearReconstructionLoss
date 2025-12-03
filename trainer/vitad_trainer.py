@@ -56,9 +56,9 @@ class ViTADTrainer(BaseTrainer):
             self.imgs, _ = self.mixup_fn(self.imgs, torch.ones(self.imgs.shape[0], device=self.imgs.device))
         with self.amp_autocast():
             self.forward()
-            loss_cos = self.loss_terms['cos'](self.feats_t, self.feats_s)
-        self.backward_term(loss_cos, self.optim)
-        update_log_term(self.log_terms.get('cos'), reduce_tensor(loss_cos, self.world_size).clone().detach().item(), 1,
+            loss_mse = self.loss_terms['pixel'](self.feats_t, self.feats_s)
+        self.backward_term(loss_mse, self.optim)
+        update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1,
                         self.master)
 
     @torch.no_grad()
@@ -80,8 +80,8 @@ class ViTADTrainer(BaseTrainer):
             test_data = next(test_loader)
             self.set_input(test_data)
             self.forward()
-            loss_cos = self.loss_terms['cos'](self.feats_t, self.feats_s)
-            update_log_term(self.log_terms.get('cos'), reduce_tensor(loss_cos, self.world_size).clone().detach().item(),
+            loss_mse = self.loss_terms['pixel'](self.feats_t, self.feats_s)
+            update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(),
                             1, self.master)
             # get anomaly maps
             anomaly_map, _ = self.evaluator.cal_anomaly_map(self.feats_t, self.feats_s,

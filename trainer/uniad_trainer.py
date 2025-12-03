@@ -31,12 +31,34 @@ from timm.utils import dispatch_clip_grad
 from ._base_trainer import BaseTrainer
 from . import TRAINER
 from util.vis import vis_rgb_gt_amp
-
-
+import wandb
+import setproctitle
+setproctitle.setproctitle("Minh Tri is training...")
 @TRAINER.register_module
 class UniADTrainer(BaseTrainer):
 	def __init__(self, cfg):
 		super(UniADTrainer, self).__init__(cfg)
+		if self.master and hasattr(self.cfg, 'wandb') and self.cfg.wandb.enabled:
+			wandb_cfg = self.cfg.wandb
+		
+			if wandb_cfg.api_key:
+				os.environ["WANDB_API_KEY"] = wandb_cfg.api_key
+			
+			# Khởi tạo WandB Run
+			self.wandb_run = wandb.init(
+				project=wandb_cfg.project,
+				entity=wandb_cfg.entity,
+				name=wandb_cfg.name,
+				tags=wandb_cfg.tags,
+				notes=wandb_cfg.notes,
+				mode=wandb_cfg.mode,
+				group=wandb_cfg.group,
+				job_type=wandb_cfg.job_type,
+				resume=wandb_cfg.resume,
+				id=wandb_cfg.run_id
+			)
+		else:
+			self.wandb_run = None
 
 	def reset(self, isTrain=True):
 		self.net.train(mode=isTrain)
@@ -79,6 +101,10 @@ class UniADTrainer(BaseTrainer):
 	def _finish(self):
 		log_msg(self.logger, 'finish training')
 		self.writer.close() if self.master else None
+		if self.master and self.wandb_run:
+			self.wandb_run.finish()
+		log_msg(self.logger, 'finish training')
+		self.writer.close() if self.master else None
 		metric_list = []
 		for idx, cls_name in enumerate(self.cls_names):
 			for metric in self.metrics:
@@ -116,8 +142,17 @@ class UniADTrainer(BaseTrainer):
 			# ---------- log ----------
 			if self.master:
 				if self.iter % self.cfg.logging.train_log_per == 0:
+					# Log thông thường
 					msg = able(self.progress.get_msg(self.iter, self.iter_full, self.iter / train_length, self.iter_full / train_length), self.master, None)
 					log_msg(self.logger, msg)
+					
+					# === Bổ sung: Log metrics lên WandB ===
+					if self.wandb_run:
+						log_data = {f'Train/{k}': v.val for k, v in self.log_terms.items()}
+						log_data['lr'] = self.optim.param_groups[0]["lr"] # Lấy lr đã được scheduler_step cập nhật
+						log_data['pixel_loss'] = self.log_terms.get('pixel').val
+						self.wandb_run.log(log_data, step=self.iter)
+						
 					if self.writer:
 						for k, v in self.log_terms.items():
 							self.writer.add_scalar(f'Train/{k}', v.val, self.iter)
@@ -130,7 +165,9 @@ class UniADTrainer(BaseTrainer):
 				if self.cfg.dist and self.dist_BN != '':
 					distribute_bn(self.net, self.world_size, self.dist_BN)
 				self.optim.sync_lookahead() if hasattr(self.optim, 'sync_lookahead') else None
-				if self.epoch >= self.cfg.trainer.test_start_epoch or self.epoch % self.cfg.trainer.test_per_epoch == 0:
+				if self.epoch == self.cfg.trainer.test_start_epoch:
+					self.test()
+				elif self.epoch > self.cfg.trainer.test_start_epoch and self.epoch % self.cfg.trainer.test_per_epoch == 0:
 					self.test()
 				else:
 					self.test_ghost()
@@ -220,31 +257,67 @@ class UniADTrainer(BaseTrainer):
 						valid_results = True
 		else:
 			results = dict(imgs_masks=imgs_masks, anomaly_maps=anomaly_maps, cls_names=cls_names, anomalys=anomalys)
+			
 		if self.master:
 			results = {k: np.concatenate(v, axis=0) for k, v in results.items()}
 			msg = {}
+			wandb_metric_log = {} # Dictionary chỉ chứa Avg metrics cho WandB
+			
+			# --- CHỈ TÍNH VÀ LOG AVG ---
+			
+			# Bước 1: Tính toán và lưu trữ các metric cho từng class (vẫn cần để tính Avg)
+			all_class_metrics = {metric: [] for metric in self.metrics}
+			
 			for idx, cls_name in enumerate(self.cls_names):
 				metric_results = self.evaluator.run(results, cls_name, self.logger)
+				
 				msg['Name'] = msg.get('Name', [])
 				msg['Name'].append(cls_name)
+				
+				# Biến cờ cho biết đây có phải là lớp cuối cùng không (để tính Avg trong tabulate)
 				avg_act = True if len(self.cls_names) > 1 and idx == len(self.cls_names) - 1 else False
+				
 				msg['Name'].append('Avg') if avg_act else None
-				# msg += f'\n{cls_name:<10}'
+				
 				for metric in self.metrics:
 					metric_result = metric_results[metric] * 100
+					
+					# Cập nhật metric recorder (cần cho (Max))
 					self.metric_recorder[f'{metric}_{cls_name}'].append(metric_result)
+					
+					# Lưu trữ giá trị để tính trung bình cuối cùng
+					all_class_metrics[metric].append(metric_result) 
+					
 					max_metric = max(self.metric_recorder[f'{metric}_{cls_name}'])
 					max_metric_idx = self.metric_recorder[f'{metric}_{cls_name}'].index(max_metric) + 1
+					
+					# Cập nhật thông báo (msg) cho từng class (vẫn cần để in ra bảng)
 					msg[metric] = msg.get(metric, [])
 					msg[metric].append(metric_result)
 					msg[f'{metric} (Max)'] = msg.get(f'{metric} (Max)', [])
 					msg[f'{metric} (Max)'].append(f'{max_metric:.3f} ({max_metric_idx:<3d} epoch)')
+					
 					if avg_act:
-						metric_result_avg = sum(msg[metric]) / len(msg[metric])
+						# Tính trung bình (Avg)
+						metric_result_avg = sum(all_class_metrics[metric]) / len(all_class_metrics[metric])
+						
+						# Cập nhật metric recorder Avg
 						self.metric_recorder[f'{metric}_Avg'].append(metric_result_avg)
+						
+						# === LOG WANDB (CHỈ AVG) ===
+						wandb_metric_log[f'Test/Avg/{metric}'] = metric_result_avg / 100.0 # Log giá trị 0-1
+						
+						# Cập nhật thông báo (msg) cho hàng Avg
 						max_metric = max(self.metric_recorder[f'{metric}_Avg'])
 						max_metric_idx = self.metric_recorder[f'{metric}_Avg'].index(max_metric) + 1
 						msg[metric].append(metric_result_avg)
 						msg[f'{metric} (Max)'].append(f'{max_metric:.3f} ({max_metric_idx:<3d} epoch)')
+			
+			# In ra bảng tabulate
 			msg = tabulate.tabulate(msg, headers='keys', tablefmt="pipe", floatfmt='.3f', numalign="center", stralign="center", )
 			log_msg(self.logger, f'\n{msg}')
+
+			# --- GỬI LOG AVG LÊN WANDB ---
+			if self.wandb_run:
+				wandb_metric_log['epoch'] = self.epoch
+				self.wandb_run.log(wandb_metric_log)

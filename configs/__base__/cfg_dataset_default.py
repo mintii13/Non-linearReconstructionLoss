@@ -17,7 +17,9 @@ class cfg_dataset_default(Namespace):
 		self.data.type = 'DefaultAD'
 		self.data.root = 'data/mvtec'  # ['mvtec', 'visa', 'mvtec3d', 'medical']
 		self.data.meta = 'meta.json'
-		self.data.cls_names = []
+		self.data.cls_names = ['carpet', 'grid', 'leather', 'tile', 'wood',
+			'bottle', 'cable', 'capsule', 'hazelnut', 'metal_nut',
+			'pill', 'screw', 'toothbrush', 'transistor', 'zipper']
 
 		# --> for COCO-AD
 		# self.data.type = 'DefaultAD'
