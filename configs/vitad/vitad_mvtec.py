@@ -15,10 +15,10 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		self.k_scales = [42.03, 33.96, 22.41]
 		self.seed = 42
 		self.size = 256
-		self.epoch_full = 300
+		self.epoch_full = 100
 		self.warmup_epochs = 0
-		self.test_start_epoch = 100
-		self.test_per_epoch = 300
+		self.test_start_epoch = 10
+		self.test_per_epoch = 10
 		self.batch_train = 8
 		self.batch_test_per = 8
 		self.lr = 1e-4 * self.batch_train / 8
