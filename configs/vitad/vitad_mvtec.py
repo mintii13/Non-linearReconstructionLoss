@@ -12,7 +12,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		cfg_common.__init__(self)
 		cfg_dataset_default.__init__(self)
 		cfg_model_vitad.__init__(self)
-		self.k_scales = [42.03, 33.96, 22.41]
+		# self.k_scales = [42.03, 33.96, 22.41]
+		# self.k_scales = [36.11, 29.60, 19.77]
+		self.k_scales = [48.03, 38.38, 25.14]
 		self.seed = 42
 		self.size = 256
 		self.epoch_full = 100
