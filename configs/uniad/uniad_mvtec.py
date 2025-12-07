@@ -71,10 +71,15 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 			feature_size=[self.size // 16, self.size // 16],
 			neighbor_size=[self.size // 32, self.size // 32]
 		)
+		self.stats_config = dict(
+            ci_ratio=90,             # Tỷ lệ khoảng tin cậy (Confidence Interval)
+            activation_type='sigmoid', # Loại hàm kích hoạt
+            enabled=True               # Bật/Tắt tính năng này
+        )
 		self.model = Namespace()
 		self.model.name = 'uniad'
 		self.model.kwargs = dict(pretrained=False, checkpoint_path='', strict=True, model_backbone=self.model_backbone,
-								 model_decoder=self.model_decoder)
+								 model_decoder=self.model_decoder, stats_config=self.stats_config)
 
 		# ==> evaluator
 		self.evaluator.kwargs = dict(metrics=self.metrics, pooling_ks=[16, 16], max_step_aupro=100)

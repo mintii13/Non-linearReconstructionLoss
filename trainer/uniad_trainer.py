@@ -16,7 +16,7 @@ from optim import get_optim
 from loss import get_loss_terms
 from util.metric import get_evaluator
 from timm.data import Mixup
-
+from tqdm import tqdm
 import numpy as np
 from torch.nn.parallel import DistributedDataParallel as NativeDDP
 try:
@@ -59,6 +59,84 @@ class UniADTrainer(BaseTrainer):
 			)
 		else:
 			self.wandb_run = None
+
+	def calculate_k_values(self):
+        if not self.master:
+            return
+
+        # Kiểm tra xem có bật tính năng này trong config model không
+        if not hasattr(self.net, 'module'):
+            model_ref = self.net
+        else:
+            model_ref = self.net.module
+            
+        if not hasattr(model_ref, 'stats_config') or not model_ref.stats_config.get('enabled', False):
+            return
+
+        log_msg(self.logger, f"Started calculating K-Channel stats (CI Ratio: {model_ref.stats_config['ci_ratio']})...")
+        
+        self.net.eval()
+        train_loader = iter(self.train_loader)
+        all_features = []
+        
+        # Duyệt qua toàn bộ tập train
+        with torch.no_grad():
+            for i in tqdm(range(len(self.train_loader)), desc="Calculating K"):
+                try:
+                    data = next(train_loader)
+                except StopIteration:
+                    break
+                
+                self.set_input(data)
+                
+                # Gọi backbone và merge để lấy feature gốc (chưa qua sigmoid)
+                # Vì forward của UniAD (đã sửa) trả về sigmoid features nếu buffer đã set,
+                # nhưng lúc này buffer đang là 1.0 nên ta lấy output feature_align (feats_t) là được.
+                # Tuy nhiên, để chính xác nhất, ta nên lấy feature thô. 
+                # Trong code model sửa đổi, feature_align = activation(raw * k). 
+                # Ban đầu k=1, activation=sigmoid. -> Output là sigmoid(raw). 
+                # -> Không tính được min/max chuẩn của raw.
+                
+                # CÁCH KHẮC PHỤC: Truy cập trực tiếp sub-modules để lấy Raw Features
+                feats_backbone = model_ref.net_backbone(self.imgs)
+                feats_merge = model_ref.net_merge(feats_backbone)
+                all_features.append(feats_merge.detach().cpu())
+
+        # Gộp tất cả features: N x C x H x W
+        full_features = torch.cat(all_features, dim=0)
+        N, C, H, W = full_features.shape
+        
+        # Chuyển về dạng (C, N*H*W) để tính thống kê
+        feature_np = full_features.permute(1, 0, 2, 3).reshape(C, -1).numpy()
+        
+        ci_ratio = model_ref.stats_config['ci_ratio']
+        tail = (100 - ci_ratio) / 2.0
+        
+        # Chọn tử số dựa trên activation type
+        numerator = 8.0 if model_ref.activation_type == 'sigmoid' else 4.8
+        
+        k_list = []
+        for c in range(C):
+            channel_data = feature_np[c]
+            lower = np.percentile(channel_data, tail)
+            upper = np.percentile(channel_data, 100 - tail)
+            r = upper - lower
+            
+            if r > 1e-6:
+                k = numerator / r
+            else:
+                k = 1.0
+            k_list.append(k)
+            
+        # Update buffer của model
+        k_tensor = torch.tensor(k_list, dtype=torch.float32).cuda()
+        model_ref.k_values.copy_(k_tensor)
+        
+        log_msg(self.logger, f"K-Values calculated. Mean K: {k_tensor.mean():.4f}")
+        
+        # Giải phóng bộ nhớ
+        del all_features, full_features, feature_np
+        torch.cuda.empty_cache()
 
 	def reset(self, isTrain=True):
 		self.net.train(mode=isTrain)
@@ -123,6 +201,17 @@ class UniADTrainer(BaseTrainer):
 	def train(self):
 		self.reset(isTrain=True)
 		self.train_loader.sampler.set_epoch(int(self.epoch)) if self.cfg.dist else None
+		if self.epoch == 0 and self.iter == 0:
+            self.calculate_k_values()
+            
+            # Broadcast K values cho các GPU khác nếu dùng DDP
+            if self.cfg.dist:
+                if hasattr(self.net, 'module'):
+                    torch.distributed.broadcast(self.net.module.k_values, src=0)
+                else:
+                    torch.distributed.broadcast(self.net.k_values, src=0)
+            
+            self.net.train()
 		train_length = self.cfg.data.train_size
 		train_loader = iter(self.train_loader)
 		while self.epoch < self.epoch_full and self.iter < self.iter_full:

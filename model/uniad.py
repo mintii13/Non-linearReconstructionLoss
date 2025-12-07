@@ -755,7 +755,7 @@ from argparse import Namespace
 
 
 class UniAD(nn.Module):
-	def __init__(self, model_backbone, model_decoder):
+	def __init__(self, model_backbone, model_decoder, stats_config=None):
 		super(UniAD, self).__init__()
 		# self.net_backbone = efficientnet_b4(pretrained=True, outblocks=[1, 5, 9, 21], outstrides=[2, 4, 8, 16], pretrained_model='model/pretrain/efficientnet-b4-6ed6700e.pth')
 		self.net_backbone = get_model(model_backbone)
@@ -773,6 +773,20 @@ class UniAD(nn.Module):
 		# ********************* reconstruction {'pos_embed_type': 'learned', 'hidden_dim': 256, 'nhead': 8, 'num_encoder_layers': 4, 'num_decoder_layers': 4, 'dim_feedforward': 1024, 'dropout': 0.1, 'activation': 'relu', 'normalize_before': False, 'feature_jitter': {'scale': 20.0, 'prob': 1.0}, 'neighbor_mask': {'neighbor_size': [7, 7], 'mask': [True, True, True]}, 'save_recon': {'save_dir': 'result_recon'}, 'initializer': {'method': 'xavier_uniform'}, 'feature_size': [14, 14], 'inplanes': [272], 'instrides': [16]}
 
 		self.frozen_layers = ['net_backbone']
+		self.stats_config = stats_config
+        if self.stats_config:
+            self.activation_type = self.stats_config.get('activation_type', 'sigmoid')
+        else:
+            self.activation_type = 'sigmoid'
+		out_channels = model_decoder['outplanes'][0]
+        self.register_buffer('k_values', torch.ones(out_channels, dtype=torch.float32))
+
+    def _get_activation(self):
+        if self.activation_type == 'sigmoid':
+            return torch.sigmoid
+        elif self.activation_type == 'tanh':
+            return torch.tanh
+        return torch.sigmoid
 
 	def freeze_layer(self, module):
 		module.eval()
@@ -792,8 +806,31 @@ class UniAD(nn.Module):
 		feats_backbone = self.net_backbone(imgs)
 		feats_merge = self.net_merge(feats_backbone)
 		feats_merge = feats_merge.detach()
-		feature_align, feature_rec, pred = self.net_ad(feats_merge)
-		return feature_align, feature_rec, pred
+		feature_align, feature_rec, _ = self.net_ad(feats_merge)
+		if self.stats_config and self.stats_config.get('enabled', False):
+            # Reshape K để broadcast: (1, C, 1, 1)
+            k_spatial = self.k_values.view(1, -1, 1, 1)
+            act_fn = self._get_activation()
+            
+            # Scale và Activation
+            feature_align = act_fn(feature_align * k_spatial)
+            feature_rec = act_fn(feature_rec * k_spatial)
+            
+            # [QUAN TRỌNG] Tính lại Pred (Anomaly Map) dựa trên Sigmoid Features
+            # Công thức: sqrt(sum((rec - align)^2)) -> Upsample
+            pred = torch.sqrt(
+                torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True)
+            ) # B x 1 x H x W
+            pred = self.net_ad.upsample(pred) # Upsample về kích thước ảnh gốc
+            
+        else:
+            # Nếu tắt tính năng thì dùng logic cũ (tính lại pred hoặc dùng pred gốc)
+            pred = torch.sqrt(
+                torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True)
+            )
+            pred = self.net_ad.upsample(pred)
+
+        return feature_align, feature_rec, pred
 
 
 @MODEL.register_module

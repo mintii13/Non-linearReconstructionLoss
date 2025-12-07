@@ -15,10 +15,10 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 
 		self.seed = 42
 		self.size = 256
-		self.epoch_full = 300
+		self.epoch_full = 100
 		self.warmup_epochs = 0
-		self.test_start_epoch = self.epoch_full
-		self.test_per_epoch = self.epoch_full // 10
+		self.test_start_epoch = 10
+		self.test_per_epoch = 10
 		self.batch_train = 32
 		self.batch_test_per = 32
 		self.lr = 0.001 * self.batch_train / 8
