@@ -3,7 +3,7 @@ from timm.scheduler.cosine_lr import CosineLRScheduler
 from timm.scheduler.tanh_lr import TanhLRScheduler
 from timm.scheduler.step_lr import StepLRScheduler
 from timm.scheduler.plateau_lr import PlateauLRScheduler
-
+from timm.scheduler.multistep_lr import MultiStepLRScheduler
 
 def get_scheduler(cfg, optimizer):
 	kwargs = {k: v for k, v in cfg.trainer.scheduler_kwargs.items()}
@@ -25,7 +25,10 @@ def get_scheduler(cfg, optimizer):
 	elif kwargs['warmup_epochs'] > -1:
 		t_initial = cfg.trainer.epoch_full
 		warmup_t = kwargs['warmup_epochs']
-		decay_t = kwargs['decay_epochs']
+		if name == 'multi_step':
+			decay_t = kwargs['milestones'] # Use the list of milestones from kwargs
+		else:
+			decay_t = kwargs['decay_epochs']
 		patience_t = kwargs['patience_epochs']
 		if use_iters:
 			t_initial, warmup_t, decay_t, patience_t = [t * cfg.data.train_size for t in [t_initial, warmup_t, decay_t, patience_t]]
@@ -46,13 +49,13 @@ def get_scheduler(cfg, optimizer):
 		noise_range_t = None
 		
 	kwargs_common = dict(optimizer=optimizer,
-						 warmup_lr_init=kwargs['warmup_lr'],
-						 warmup_t=warmup_t,
-						 noise_pct=kwargs.get('noise_pct', 0.67),
-						 noise_std=kwargs.get('noise_std', 1.),
-						 noise_seed=kwargs.get('noise_seed', 42),
-						 noise_range_t=noise_range_t,
-						 )
+						warmup_lr_init=kwargs['warmup_lr'],
+						warmup_t=warmup_t,
+						noise_pct=kwargs.get('noise_pct', 0.67),
+						noise_std=kwargs.get('noise_std', 1.),
+						noise_seed=kwargs.get('noise_seed', 42),
+						noise_range_t=noise_range_t,
+						)
 	if name == 'cosine':
 		lr_scheduler = CosineLRScheduler(
 			**kwargs_common,
@@ -87,6 +90,13 @@ def get_scheduler(cfg, optimizer):
 			lr_min=kwargs['lr_min'],
 			mode=mode,
 			cooldown_t=0,
+		)
+	elif name == 'multi_step':
+		lr_scheduler = MultiStepLRScheduler(
+			**kwargs_common,
+			decay_t=decay_t,
+			decay_rate=kwargs['decay_rate'],
+			t_in_epochs=True,
 		)
 	else:
 		raise Exception(f'invalid scheduler: {name}')

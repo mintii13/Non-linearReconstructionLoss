@@ -12,19 +12,21 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         cfg_dataset_default.__init__(self)
         cfg_model_uniad.__init__(self)
 
-        self.seed = 133
+        self.seed = 133 
         self.size = 256
         
         # === Trainer Settings ===
         self.epoch_full = 600
         self.warmup_epochs = 0
-        self.test_per_epoch = 300
-        self.test_start_epoch = 100
+        self.test_per_epoch = 50
+        self.test_start_epoch = 50
         
         self.batch_train = 8
         self.batch_test_per = 8
-        self.lr = 1e-4 * self.batch_train / 8
+        
+        self.lr = 2e-4 * self.batch_train / 8 
         self.weight_decay = 0.0001
+        
         self.metrics = [
             'mAUROC_sp_max', 'mAP_sp_max', 'mF1_max_sp_max',
             'mAUPRO_px', 'mAUROC_px', 'mAP_px', 'mF1_max_px',
@@ -65,16 +67,16 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             neighbor_size=[self.size // 32, self.size // 32]
         )
         
-        # ==> Stats Config (Quan trọng)
+        # Stats Config
         self.stats_config = dict(
             ci_ratio=90,            
-            activation_type='sigmoid', 
+            activation_type='sigmoid',
             enabled=True             
         )
 
-        # ==> Model Config
+        # Model Config
         self.model = Namespace()
-        self.model.name = 'baseline' # <--- Đổi tên model ở đây
+        self.model.name = 'baseline' 
         self.model.kwargs = dict(
             pretrained=False, 
             checkpoint_path='', 
@@ -84,19 +86,23 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             stats_config=self.stats_config
         )
 
-        # ==> Evaluator, Optimizer, Trainer, Loss, Logging (Giữ nguyên)
+        # Evaluator, Optimizer
         self.evaluator.kwargs = dict(metrics=self.metrics, pooling_ks=[16, 16], max_step_aupro=100)
         self.optim.lr = self.lr
         self.optim.kwargs = dict(name='adamw', betas=(0.9, 0.999), eps=1e-8, weight_decay=self.weight_decay, amsgrad=False)
 
-        self.trainer.name = 'UniADTrainer'
+        # Trainer config
+        self.trainer.name = 'UniADTrainer' 
         self.trainer.logdir_sub = ''
         self.trainer.resume_dir = ''
         self.trainer.epoch_full = self.epoch_full
+        
         self.trainer.scheduler_kwargs = dict(
-            name='step', lr_noise=None, noise_pct=0.67, noise_std=1.0, noise_seed=42, lr_min=self.lr / 1e2,
-            warmup_lr=self.lr / 1e3, warmup_iters=-1, cooldown_iters=0, warmup_epochs=self.warmup_epochs, cooldown_epochs=0, use_iters=True,
-            patience_iters=0, patience_epochs=0, decay_iters=0, decay_epochs=int(self.epoch_full * 0.8), cycle_decay=0.1, decay_rate=0.1)
+            name='multi_step', milestones=[100, 200, 300, 400, 500], decay_rate=0.5, lr_noise=None, noise_pct=0.67, noise_std=1.0, noise_seed=133, lr_min=self.lr / 1e2,
+            warmup_lr=self.lr / 1e3, warmup_iters=-1, cooldown_iters=0, warmup_epochs=self.warmup_epochs, cooldown_epochs=0, use_iters=False,
+            patience_iters=0, patience_epochs=0, decay_iters=0, decay_epochs=0,
+            cycle_decay=0.1)
+            
         self.trainer.mixup_kwargs = dict(mixup_alpha=0.8, cutmix_alpha=1.0, cutmix_minmax=None, prob=0.0, switch_prob=0.5, mode='batch', correct_lam=True, label_smoothing=0.1)
         self.trainer.test_start_epoch = self.test_start_epoch
         self.trainer.test_per_epoch = self.test_per_epoch
@@ -123,11 +129,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # === WandB ===
         self.wandb = Namespace()
         self.wandb.enabled = True
-        self.wandb.project = "MVTec_Baseline" # Đổi tên project để phân biệt
+        self.wandb.project = "Ader_MVTec" 
         self.wandb.entity = None 
-        self.wandb.name = 'Baseline_600e'
-        self.wandb.tags = ["mvtec", "baseline"]
-        self.wandb.notes = "Baseline (UniADMemory) training."
+        self.wandb.name = 'Lnorm_SigmoidChannel90_600_lr0.0002_step100_256'
+        self.wandb.tags = ["mvtec", "baseline", "replica"]
+        self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"
         self.wandb.group = None
         self.wandb.job_type = "train"

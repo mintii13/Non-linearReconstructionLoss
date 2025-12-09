@@ -67,7 +67,7 @@ def init_checkpoint(cfg):
             cfg.model.kwargs['checkpoint_path'] = '{}/ckpt.pth'.format(cfg.logdir)
         else:
             cfg.model.kwargs['checkpoint_path'] = '{}/{}'.format(cfg.logdir, checkpoint_path.split('/')[-1])
-        state_dict = torch.load(cfg.model.kwargs['checkpoint_path'], map_location='cpu')
+        state_dict = torch.load(cfg.model.kwargs['checkpoint_path'], map_location='cpu', weights_only=False)
         cfg.trainer.iter, cfg.trainer.epoch = state_dict['iter'], state_dict['epoch']
         cfg.trainer.metric_recorder = state_dict['metric_recorder']
     else:

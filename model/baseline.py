@@ -12,7 +12,6 @@ from typing import Optional
 import numpy as np
 
 from model import get_model, MODEL
-from models.initializer import initialize_from_cfg
 
 # ==========================================
 # 1. MFCN (Neck)
@@ -307,6 +306,7 @@ def _get_activation_fn(activation):
     if activation == "relu": return F.relu
     if activation == "gelu": return F.gelu
     if activation == "glu": return F.glu
+    if activation == "selu": return F.selu
     raise RuntimeError(f"activation should be relu/gelu, not {activation}.")
 
 class PositionEmbeddingSine(nn.Module):
@@ -369,9 +369,9 @@ def build_position_embedding(pos_embed_type, feature_size, hidden_dim):
 # ==========================================
 # 4. Baseline Wrapper Class (Nối mọi thứ lại)
 # ==========================================
-class Baseline(nn.Module):
+class BaselineWrapper(nn.Module):
     def __init__(self, model_backbone, model_decoder, stats_config=None):
-        super(Baseline, self).__init__()
+        super().__init__()
         self.net_backbone = get_model(model_backbone)
         self.net_merge = MFCN(
             inplanes=model_decoder['inplanes'], 
@@ -403,6 +403,12 @@ class Baseline(nn.Module):
 
         self.frozen_layers = ['net_backbone']
         self.stats_config = stats_config
+    @property
+    def activation_type(self):
+        return self.net_ad.activation_type
+    @property
+    def k_values(self):
+        return self.net_ad.channel_k_values
 
     def freeze_layer(self, module):
         module.eval()
@@ -438,5 +444,52 @@ class Baseline(nn.Module):
 # ==========================================
 @MODEL.register_module
 def baseline(pretrained=False, **kwargs):
-    model = Baseline(**kwargs)
+    model = BaselineWrapper(**kwargs)
     return model
+
+def init_weights_normal(module, std=0.01):
+    for m in module.modules():
+        if isinstance(m, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
+            nn.init.normal_(m.weight.data, std=std)
+            if m.bias is not None:
+                m.bias.data.zero_()
+
+def init_weights_xavier(module, method):
+    for m in module.modules():
+        if isinstance(m, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
+            if "normal" in method:
+                nn.init.xavier_normal_(m.weight.data)
+            elif "uniform" in method:
+                nn.init.xavier_uniform_(m.weight.data)
+            if m.bias is not None:
+                m.bias.data.zero_()
+
+def init_weights_msra(module, method):
+    for m in module.modules():
+        if isinstance(m, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
+            if "normal" in method:
+                nn.init.kaiming_normal_(m.weight.data, a=1)
+            elif "uniform" in method:
+                nn.init.kaiming_uniform_(m.weight.data, a=1)
+            if m.bias is not None:
+                m.bias.data.zero_()
+
+def initialize(model, method, **kwargs):
+    for m in model.modules():
+        if isinstance(m, nn.BatchNorm2d):
+            m.weight.data.fill_(1)
+            m.bias.data.zero_()
+    if method == "normal":
+        init_weights_normal(model, **kwargs)
+    elif "msra" in method:
+        init_weights_msra(model, method)
+    elif "xavier" in method:
+        init_weights_xavier(model, method)
+
+def initialize_from_cfg(model, cfg):
+    if cfg is None:
+        initialize(model, "normal", std=0.01)
+        return
+    cfg = copy.deepcopy(cfg)
+    method = cfg.pop("method")
+    initialize(model, method, **cfg)

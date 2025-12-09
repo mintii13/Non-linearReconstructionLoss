@@ -12,9 +12,12 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		cfg_common.__init__(self)
 		cfg_dataset_default.__init__(self)
 		cfg_model_vitad.__init__(self)
-		# self.k_scales = [42.03, 33.96, 22.41]
-		# self.k_scales = [36.11, 29.60, 19.77]
-		self.k_scales = [48.03, 38.38, 25.14]
+
+		self.stats_config = dict(
+			ci_ratio=85,
+			activation_type='sigmoid',
+			enabled=True
+		)
 		self.seed = 42
 		self.size = 256
 		self.epoch_full = 100
@@ -27,7 +30,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		self.weight_decay = 0.0001
 		self.metrics = [
 			'mAUROC_sp_max', 'mAP_sp_max', 'mF1_max_sp_max',
-			'mAUPRO_px',
+			# 'mAUPRO_px',
 			'mAUROC_px', 'mAP_px', 'mF1_max_px',
 			# 'mF1_px_0.2_0.8_0.1', 'mAcc_px_0.2_0.8_0.1', 'mIoU_px_0.2_0.8_0.1',
 			# 'mIoU_max_px',
@@ -62,11 +65,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		self.model_s = Namespace()
 		self.model_s.name = 'de_vit_small_patch16_224_dino'
 		self.model_s.kwargs = dict(pretrained=False, checkpoint_path='', strict=False,
-								   img_size=self.size, students=[3, 6, 9], depth=9)
+								img_size=self.size, students=[3, 6, 9], depth=9)
 		self.model = Namespace()
 		self.model.name = 'vitad'
 		self.model.kwargs = dict(pretrained=False, checkpoint_path='', strict=True, model_t=self.model_t,
-								 model_f=self.model_f, model_s=self.model_s, k_scales=self.k_scales)
+								model_f=self.model_f, model_s=self.model_s, stats_config=self.stats_config)
 
 		# ==> evaluator
 		self.evaluator.kwargs = dict(metrics=self.metrics, pooling_ks=[16, 16], max_step_aupro=100)
@@ -108,3 +111,17 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 			dict(name='batch_t', fmt=':>5.3f', add_name='avg'),
 			dict(name='pixel', suffixes=[''], fmt=':>5.3f', add_name='avg'),
 		]
+		self.wandb = Namespace()
+		self.wandb.enabled = True
+		self.wandb.project = "Ader_MVTec"
+		self.wandb.name = "Vitad_SigmoidChannel85_100"
+		self.wandb.tags = ["mvtec", "baseline", "replica"]
+		self.wandb.notes = "baseline with sigmoid channel."
+		self.wandb.mode = "online"
+		self.wandb.group = None
+		self.wandb.job_type = "train"
+		self.wandb.resume = "allow"
+		self.wandb.run_id = None
+		self.wandb.dir = None
+		self.wandb.login = True
+		self.wandb.api_key = "0f2ca680372a916c31aab5ede7bbefab410fe503"

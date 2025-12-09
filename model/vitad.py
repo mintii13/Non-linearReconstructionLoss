@@ -217,14 +217,14 @@ def vit_small_patch16_224_dino2reg(pretrained=True, **kwargs):
 @MODEL.register_module
 def deit_tiny_distilled_patch16_224(pretrained=True, **kwargs):
 	model = DistilledVisionTransformer(
-        img_size=kwargs.pop('img_size'), patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+		img_size=kwargs.pop('img_size'), patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
+		norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
 	model.default_cfg = _cfg()
 	if pretrained:
 		checkpoint = torch.hub.load_state_dict_from_url(
-            url="https://dl.fbaipublicfiles.com/deit/deit_tiny_distilled_patch16_224-b40b3cf7.pth",
-            map_location="cpu", check_hash=True
-        )
+			url="https://dl.fbaipublicfiles.com/deit/deit_tiny_distilled_patch16_224-b40b3cf7.pth",
+			map_location="cpu", check_hash=True
+		)
 		model.load_state_dict(checkpoint["model"])
 	return model
 
@@ -387,14 +387,28 @@ def de_vit_base_patch16_clip_224(pretrained=False, **kwargs):
 
 # ========== ViTAD ==========
 class ViTAD(nn.Module):
-	def __init__(self, model_t, model_f, model_s, k_scales=None):
+	def __init__(self, model_t, model_f, model_s, stats_config=None, **kwargs):
 		super(ViTAD, self).__init__()
 		self.net_t = get_model(model_t)
 		self.net_fusion = get_model(model_f)
 		self.net_s = get_model(model_s)
 
 		self.frozen_layers = ['net_t']
-		self.k_scales = k_scales
+		self.stats_config = stats_config
+		if self.stats_config:
+			self.activation_type = self.stats_config.get('activation_type', 'sigmoid')
+		else:
+			self.activation_type = 'sigmoid'
+
+		self.k_scales = nn.ParameterList()
+		self.is_k_calculated = False
+
+	def _get_activation(self):
+		if self.activation_type == 'sigmoid':
+			return torch.sigmoid
+		elif self.activation_type == 'tanh':
+			return torch.tanh
+		return torch.sigmoid
 
 	def freeze_layer(self, module):
 		module.eval()
@@ -415,14 +429,22 @@ class ViTAD(nn.Module):
 		feats_t = [f.detach() for f in feats_t]
 		feats_n = [f.detach() for f in feats_n]
 		feats_s = self.net_s(self.net_fusion(feats_n))
-		feats_t = [
-			torch.sigmoid(self.k_scales[i] * feats_t[i]) 
-			for i in range(len(feats_t))
-		]
-		feats_s = [
-			torch.sigmoid(self.k_scales[i] * feats_s[i]) 
-			for i in range(len(feats_s))
-		]
+		use_stats = self.stats_config and self.stats_config.get('enabled', False)
+
+		if use_stats:
+			act_fn = self._get_activation()
+			if self.is_k_calculated and len(self.k_scales) > 0:
+				k_list = self.k_scales
+			else:
+				k_list = [1.0] * len(feats_t)
+			feats_t = [
+				act_fn(k_list[i] * feats_t[i]) 
+				for i in range(len(feats_t))
+			]
+			feats_s = [
+				act_fn(k_list[i] * feats_s[i]) 
+				for i in range(len(feats_s))
+			]
 		return feats_t, feats_s
 
 
