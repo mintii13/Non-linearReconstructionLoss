@@ -13,10 +13,10 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         cfg_model_uniad.__init__(self)
 
         self.seed = 133 
-        self.size = 256
+        self.size = 224
         
         # === Trainer Settings ===
-        self.epoch_full = 600
+        self.epoch_full = 500
         self.warmup_epochs = 0
         self.test_per_epoch = 50
         self.test_start_epoch = 50
@@ -29,7 +29,8 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         self.metrics = [
             'mAUROC_sp_max', 'mAP_sp_max', 'mF1_max_sp_max',
-            'mAUPRO_px', 'mAUROC_px', 'mAP_px', 'mF1_max_px',
+            # 'mAUPRO_px', 
+            'mAUROC_px', 'mAP_px', 'mF1_max_px',
         ]
 
         # ==> Data
@@ -98,10 +99,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.trainer.epoch_full = self.epoch_full
         
         self.trainer.scheduler_kwargs = dict(
-            name='multi_step', milestones=[100, 200, 300, 400, 500], decay_rate=0.5, lr_noise=None, noise_pct=0.67, noise_std=1.0, noise_seed=133, lr_min=self.lr / 1e2,
-            warmup_lr=self.lr / 1e3, warmup_iters=-1, cooldown_iters=0, warmup_epochs=self.warmup_epochs, cooldown_epochs=0, use_iters=False,
-            patience_iters=0, patience_epochs=0, decay_iters=0, decay_epochs=0,
-            cycle_decay=0.1)
+            name='step', lr_noise=None, noise_pct=0.67, noise_std=1.0, noise_seed=42, lr_min=self.lr / 1e2,
+            warmup_lr=self.lr / 1e3, warmup_iters=-1, cooldown_iters=0, warmup_epochs=self.warmup_epochs, cooldown_epochs=0, use_iters=True,
+            patience_iters=0, patience_epochs=0, decay_iters=0, decay_epochs=int(self.epoch_full * 0.8), cycle_decay=0.1, decay_rate=0.1)
             
         self.trainer.mixup_kwargs = dict(mixup_alpha=0.8, cutmix_alpha=1.0, cutmix_minmax=None, prob=0.0, switch_prob=0.5, mode='batch', correct_lam=True, label_smoothing=0.1)
         self.trainer.test_start_epoch = self.test_start_epoch
@@ -131,7 +131,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.enabled = True
         self.wandb.project = "Ader_MVTec" 
         self.wandb.entity = None 
-        self.wandb.name = 'Lnorm_SigmoidChannel90_600_lr0.0002_step100_256'
+        self.wandb.name = 'Lnorm_SigmoidChannel90_500_lr0.0002_224_512dim'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"
