@@ -131,7 +131,7 @@ class UniADTrainer(BaseTrainer):
 		# Update buffer của model
 		k_tensor = torch.tensor(k_list, dtype=torch.float32).cuda()
 		model_ref.k_values.copy_(k_tensor)
-		
+		print("\n")
 		log_msg(self.logger, f"K-Values calculated. Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}")
 		
 		# Giải phóng bộ nhớ
