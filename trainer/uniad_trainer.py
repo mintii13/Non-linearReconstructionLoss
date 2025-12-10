@@ -133,7 +133,7 @@ class UniADTrainer(BaseTrainer):
 		model_ref.k_values.copy_(k_tensor)
 		print("\n")
 		log_msg(self.logger, f"K-Values calculated. Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}")
-		
+		print(f"K-Values calculated.** Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}", flush=True)
 		# Giải phóng bộ nhớ
 		del all_features, full_features, feature_np
 		torch.cuda.empty_cache()
