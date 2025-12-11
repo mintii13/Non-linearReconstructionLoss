@@ -14,11 +14,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 		cfg_model_invad.__init__(self)
 
 		self.stats_config = dict(
-            ci_ratio=90, 
-            activation_type='sigmoid',
-            enabled=True,
-            apply_indices=[1, 2]   
-        )
+			ci_ratio=90, 
+			activation_type='sigmoid',
+			enabled=True,
+			apply_indices=[2]   
+		)
 
 		self.seed = 42
 		self.size = 256
@@ -74,9 +74,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 		self.model_encoder = Namespace()
 		self.model_encoder.name = name
 		self.model_encoder.kwargs = dict(pretrained=True,
-										 checkpoint_path='',
-										 strict=False,
-										 features_only=True, out_indices=out_indices)
+										checkpoint_path='',
+										strict=False,
+										features_only=True, out_indices=out_indices)
 
 		self.model_fuser = dict(
 			type='Fuser', in_chas=in_chas, style_chas=style_chas, in_strides=in_strides, down_conv=True, bottle_num=1, conv_num=1, lr_mul=0.01,
@@ -84,9 +84,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 
 		latent_spatial_size = self.size // (2 ** (1 + len(in_chas)))
 		self.model_decoder = dict(in_chas=in_chas, style_chas=style_chas,
-								  latent_spatial_size=latent_spatial_size, latent_channel_size=latent_channel_size,
-								  blur_kernel=[1, 3, 3, 1], normalize_mode='LayerNorm',
-								  lr_mul=0.01, small_generator=True, layers=[2] * len(in_chas))
+								latent_spatial_size=latent_spatial_size, latent_channel_size=latent_channel_size,
+								blur_kernel=[1, 3, 3, 1], normalize_mode='LayerNorm',
+								lr_mul=0.01, small_generator=True, layers=[2] * len(in_chas))
 
 		sizes = [self.size // (2 ** (2 + i)) for i in range(len(in_chas))]
 		self.model_disor = dict(sizes=sizes, in_chas=in_chas)
@@ -94,12 +94,12 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 		self.model = Namespace()
 		self.model.name = 'invad'
 		self.model.kwargs = dict(pretrained=False,
-								 checkpoint_path='',
-								 # checkpoint_path='runs/ablation_bs_invad_mvtec_multiple_class/InvADTrainer_configs_invad_bs_bs32_20230628-005543/net.pth',
-								 strict=True,
-								 model_encoder=self.model_encoder,
-								 model_fuser=self.model_fuser,
-								 model_decoder=self.model_decoder, stats_config=self.stats_config)
+								checkpoint_path='',
+								# checkpoint_path='runs/ablation_bs_invad_mvtec_multiple_class/InvADTrainer_configs_invad_bs_bs32_20230628-005543/net.pth',
+								strict=True,
+								model_encoder=self.model_encoder,
+								model_fuser=self.model_fuser,
+								model_decoder=self.model_decoder, stats_config=self.stats_config)
 
 		# ==> evaluator
 		self.evaluator.kwargs = dict(metrics=self.metrics, pooling_ks=None, max_step_aupro=100)
@@ -141,17 +141,17 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 			dict(name='batch_t', fmt=':>5.3f', add_name='avg'),
 			dict(name='pixel', suffixes=[''], fmt=':>5.3f', add_name='avg'),
 		]
-        self.wandb = Namespace()
-        self.wandb.enabled = True
-        self.wandb.project = "Ader_MVTec"
-        self.wandb.name = "InvAD_LastSigmoidChannel90_100"
-        self.wandb.tags = ["mvtec", "invad", "sigmoid"]
-        self.wandb.notes = "InvAD with sigmoid suppression on layers [1,2]."
-        self.wandb.mode = "online"
-        self.wandb.group = None
-        self.wandb.job_type = "train"
-        self.wandb.resume = "allow"
-        self.wandb.run_id = None
-        self.wandb.dir = None
-        self.wandb.login = True
-        self.wandb.api_key = "0f2ca680372a916c31aab5ede7bbefab410fe503"
+		self.wandb = Namespace()
+		self.wandb.enabled = True
+		self.wandb.project = "Ader_MVTec"
+		self.wandb.name = "InvAD_LastSigmoidChannel90_100"
+		self.wandb.tags = ["mvtec", "invad", "sigmoid"]
+		self.wandb.notes = "InvAD with sigmoid suppression on layers [2]."
+		self.wandb.mode = "online"
+		self.wandb.group = None
+		self.wandb.job_type = "train"
+		self.wandb.resume = "allow"
+		self.wandb.run_id = None
+		self.wandb.dir = None
+		self.wandb.login = True
+		self.wandb.api_key = "0f2ca680372a916c31aab5ede7bbefab410fe503"

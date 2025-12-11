@@ -806,7 +806,7 @@ def get_disor(model_disor):
 
 
 class InvAD(nn.Module):
-    def __init__(self, model_encoder, model_fuser, model_decoder, model_disor=None):
+    def __init__(self, model_encoder, model_fuser, model_decoder, model_disor=None, stats_config=None):
         super(InvAD, self).__init__()
         self.net_encoder = get_model(model_encoder)
         self.net_fuser = get_fuser(model_fuser)
