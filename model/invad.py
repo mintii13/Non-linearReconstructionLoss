@@ -815,6 +815,13 @@ class InvAD(nn.Module):
             self.net_disor = get_disor(model_disor)
 
         self.frozen_layers = ['net_encoder']
+        self.stats_config = stats_config
+        self.k_scales = nn.ParameterList()
+        self.is_k_calculated = False
+        self.activation_type = 'sigmoid'
+        
+        if self.stats_config:
+            self.activation_type = self.stats_config.get('activation_type', 'sigmoid')
 
     def freeze_layer(self, module):
         module.eval()

@@ -14,7 +14,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		cfg_model_vitad.__init__(self)
 
 		self.stats_config = dict(
-			ci_ratio=85,
+			ci_ratio=90,
 			activation_type='sigmoid',
 			enabled=True
 		)
@@ -29,9 +29,10 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		self.lr = 1e-4 * self.batch_train / 8
 		self.weight_decay = 0.0001
 		self.metrics = [
-			'mAUROC_sp_max', 'mAP_sp_max', 'mF1_max_sp_max',
+			'mAUROC_sp_max', 'mAUROC_px', 
+			# 'mAP_sp_max', 'mF1_max_sp_max',
 			# 'mAUPRO_px',
-			'mAUROC_px', 'mAP_px', 'mF1_max_px',
+			# 'mAP_px', 'mF1_max_px',
 			# 'mF1_px_0.2_0.8_0.1', 'mAcc_px_0.2_0.8_0.1', 'mIoU_px_0.2_0.8_0.1',
 			# 'mIoU_max_px',
 		]
@@ -114,7 +115,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		self.wandb = Namespace()
 		self.wandb.enabled = True
 		self.wandb.project = "Ader_MVTec"
-		self.wandb.name = "Vitad_SigmoidChannel85_100"
+		self.wandb.name = "Vitad_2LastSigmoidChannel90_100"
 		self.wandb.tags = ["mvtec", "baseline", "replica"]
 		self.wandb.notes = "baseline with sigmoid channel."
 		self.wandb.mode = "online"

@@ -13,6 +13,13 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 		cfg_dataset_default.__init__(self)
 		cfg_model_invad.__init__(self)
 
+		self.stats_config = dict(
+            ci_ratio=90, 
+            activation_type='sigmoid',
+            enabled=True,
+            apply_indices=[1, 2]   
+        )
+
 		self.seed = 42
 		self.size = 256
 		self.epoch_full = 100
@@ -25,9 +32,10 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 		# self.lr = 1e-4 * self.batch_train / 8
 		self.weight_decay = 0.0001
 		self.metrics = [
-			'mAUROC_sp_max', 'mAP_sp_max', 'mF1_max_sp_max',
-			'mAUPRO_px',
-			'mAUROC_px', 'mAP_px', 'mF1_max_px',
+			'mAUROC_sp_max', 'mAUROC_px',
+			# 'mAP_sp_max', 'mF1_max_sp_max',
+			# 'mAUPRO_px',
+			# 'mAP_px', 'mF1_max_px',
 			# 'mF1_px_0.2_0.8_0.1', 'mAcc_px_0.2_0.8_0.1', 'mIoU_px_0.2_0.8_0.1',
 			# 'mIoU_max_px',
 		]
@@ -91,7 +99,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 								 strict=True,
 								 model_encoder=self.model_encoder,
 								 model_fuser=self.model_fuser,
-								 model_decoder=self.model_decoder)
+								 model_decoder=self.model_decoder, stats_config=self.stats_config)
 
 		# ==> evaluator
 		self.evaluator.kwargs = dict(metrics=self.metrics, pooling_ks=None, max_step_aupro=100)
@@ -133,3 +141,17 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 			dict(name='batch_t', fmt=':>5.3f', add_name='avg'),
 			dict(name='pixel', suffixes=[''], fmt=':>5.3f', add_name='avg'),
 		]
+        self.wandb = Namespace()
+        self.wandb.enabled = True
+        self.wandb.project = "Ader_MVTec"
+        self.wandb.name = "InvAD_LastSigmoidChannel90_100"
+        self.wandb.tags = ["mvtec", "invad", "sigmoid"]
+        self.wandb.notes = "InvAD with sigmoid suppression on layers [1,2]."
+        self.wandb.mode = "online"
+        self.wandb.group = None
+        self.wandb.job_type = "train"
+        self.wandb.resume = "allow"
+        self.wandb.run_id = None
+        self.wandb.dir = None
+        self.wandb.login = True
+        self.wandb.api_key = "0f2ca680372a916c31aab5ede7bbefab410fe503"

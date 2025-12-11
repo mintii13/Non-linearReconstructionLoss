@@ -402,6 +402,7 @@ class ViTAD(nn.Module):
 
 		self.k_scales = nn.ParameterList()
 		self.is_k_calculated = False
+		self.use_stats = self.stats_config and self.stats_config.get('enabled', False)
 
 	def _get_activation(self):
 		if self.activation_type == 'sigmoid':
@@ -429,22 +430,34 @@ class ViTAD(nn.Module):
 		feats_t = [f.detach() for f in feats_t]
 		feats_n = [f.detach() for f in feats_n]
 		feats_s = self.net_s(self.net_fusion(feats_n))
-		use_stats = self.stats_config and self.stats_config.get('enabled', False)
 
-		if use_stats:
+		if self.use_stats:
 			act_fn = self._get_activation()
+			
 			if self.is_k_calculated and len(self.k_scales) > 0:
 				k_list = self.k_scales
 			else:
 				k_list = [1.0] * len(feats_t)
-			feats_t = [
-				act_fn(k_list[i] * feats_t[i]) 
-				for i in range(len(feats_t))
-			]
-			feats_s = [
-				act_fn(k_list[i] * feats_s[i]) 
-				for i in range(len(feats_s))
-			]
+				
+			num_scales = len(feats_t)
+			new_feats_t = []
+			for i in range(num_scales):
+				if i == num_scales - 2: # Kiểm tra xem có phải là feature cuối cùng (sâu nhất) không
+					# Áp dụng K và Activation cho feature sâu nhất
+					new_feats_t.append(act_fn(k_list[i] * feats_t[i]))
+				else:
+					# Giữ nguyên các features nông hơn
+					new_feats_t.append(feats_t[i])
+			feats_t = new_feats_t
+			new_feats_s = []
+			for i in range(num_scales):
+				if i == num_scales - 2: # Kiểm tra xem có phải là feature cuối cùng (sâu nhất) không
+					# Áp dụng K và Activation cho feature sâu nhất
+					new_feats_s.append(act_fn(k_list[i] * feats_s[i]))
+				else:
+					# Giữ nguyên các features nông hơn
+					new_feats_s.append(feats_s[i])
+			feats_s = new_feats_s
 		return feats_t, feats_s
 
 
