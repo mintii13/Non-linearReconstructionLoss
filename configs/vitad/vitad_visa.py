@@ -12,13 +12,17 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		cfg_common.__init__(self)
 		cfg_dataset_default.__init__(self)
 		cfg_model_vitad.__init__(self)
-
+		self.stats_config = dict(
+			ci_ratio=90,
+			activation_type='sigmoid',
+			enabled=True
+		)
 		self.seed = 42
 		self.size = 256
 		self.epoch_full = 100
 		self.warmup_epochs = 0
-		self.test_start_epoch = self.epoch_full
-		self.test_per_epoch = self.epoch_full // 10
+		self.test_start_epoch = 10
+		self.test_per_epoch = 10
 		self.batch_train = 8
 		self.batch_test_per = 8
 		self.lr = 1e-4 * self.batch_train / 8
@@ -65,7 +69,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		self.model = Namespace()
 		self.model.name = 'vitad'
 		self.model.kwargs = dict(pretrained=False, checkpoint_path='', strict=True, model_t=self.model_t,
-								 model_f=self.model_f, model_s=self.model_s)
+								 model_f=self.model_f, model_s=self.model_s, stats_config=self.stats_config)
 
 		# ==> evaluator
 		self.evaluator.kwargs = dict(metrics=self.metrics, pooling_ks=[16, 16], max_step_aupro=100)

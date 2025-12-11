@@ -110,9 +110,9 @@ class DefaultAD(data.Dataset):
 						)
 					data_cls_all.append(info_img)
 				meta_info[cls_name] = data_cls_all
-		self.cls_names = ['carpet', 'grid', 'leather', 'tile', 'wood',
-			'bottle', 'cable', 'capsule', 'hazelnut', 'metal_nut',
-			'pill', 'screw', 'toothbrush', 'transistor', 'zipper']
+		# self.cls_names = ['carpet', 'grid', 'leather', 'tile', 'wood',
+		# 	'bottle', 'cable', 'capsule', 'hazelnut', 'metal_nut',
+		# 	'pill', 'screw', 'toothbrush', 'transistor', 'zipper']
 		for cls_name in self.cls_names:
 			self.data_all.extend(meta_info[cls_name])
 		random.shuffle(self.data_all) if self.train else None
