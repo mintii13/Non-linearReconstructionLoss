@@ -92,10 +92,8 @@ class InvADTrainer(BaseTrainer):
         if not self.master:
             return
 
-        # Lấy tham chiếu đến model thực (xử lý DDP)
         model_ref = self.net.module if hasattr(self.net, 'module') else self.net
         
-        # Check config enable
         stats_cfg = getattr(model_ref, 'stats_config', None)
         if not stats_cfg or not stats_cfg.get('enabled', False):
             return
@@ -104,11 +102,20 @@ class InvADTrainer(BaseTrainer):
             log_msg(self.logger, "K-Values already calculated.")
             return
 
-        log_msg(self.logger, f"Calculating K Stats (CI: {stats_cfg['ci_ratio']})...")
+        apply_indices = stats_cfg.get('apply_indices', [])
+        log_msg(self.logger, f"Calculating K Stats (CI: {stats_cfg['ci_ratio']}) for layers {apply_indices} on 100% Data...")
         
         self.net.eval()
         train_loader = iter(self.train_loader)
-        all_features_by_scale = {}
+        
+        ci_ratio = stats_cfg['ci_ratio']
+        q_lower = (100 - ci_ratio) / 2.0 / 100.0
+        q_upper = 1.0 - q_lower
+        numerator = 8.0 if stats_cfg.get('activation_type') == 'sigmoid' else 4.8 
+
+        # Dictionary chỉ lưu thống kê của các layer cần thiết
+        batch_stats = {} 
+        num_scales = 0 # Để đếm tổng số scale output của model
 
         with torch.no_grad():
             for _ in tqdm(range(len(self.train_loader)), desc="Calculating K"):
@@ -118,46 +125,70 @@ class InvADTrainer(BaseTrainer):
                     break
                 
                 self.set_input(data)
-                # InvAD: Target feature là output của Encoder
                 feats = model_ref.net_encoder(self.imgs) 
+                num_scales = len(feats) # Cập nhật số lượng scale thực tế (ví dụ 3)
                 
                 for scale_idx, feat in enumerate(feats):
-                    if scale_idx not in all_features_by_scale:
-                        all_features_by_scale[scale_idx] = []
-                    all_features_by_scale[scale_idx].append(feat.detach().cpu())
+                    # === TỐI ƯU: CHỈ TÍNH TOÁN CHO LAYER CẦN THIẾT ===
+                    if scale_idx not in apply_indices:
+                        continue 
+                    # =================================================
+                    
+                    if scale_idx not in batch_stats:
+                        batch_stats[scale_idx] = {'lower': [], 'upper': []}
+                    
+                    # Tính quantile trên GPU (rất nhanh, không tốn RAM hệ thống)
+                    # Reshape: [B, C, H, W] -> [C, -1]
+                    feat_flat = feat.permute(1, 0, 2, 3).reshape(feat.shape[1], -1)
+                    
+                    lower_val = torch.quantile(feat_flat, q_lower, dim=1)
+                    upper_val = torch.quantile(feat_flat, q_upper, dim=1)
+                    
+                    # Chỉ lưu vector thống kê [C] về CPU (vài KB)
+                    batch_stats[scale_idx]['lower'].append(lower_val.cpu())
+                    batch_stats[scale_idx]['upper'].append(upper_val.cpu())
 
-        # Tính toán K
-        ci_ratio = stats_cfg['ci_ratio']
-        tail = (100 - ci_ratio) / 2.0
-        numerator = 8.0 if stats_cfg.get('activation_type') == 'sigmoid' else 4.8 
-        
+        # Reset ParameterList
         model_ref.k_scales = torch.nn.ParameterList()
+        
+        # Duyệt qua tất cả các scale index (0, 1, 2...) để đảm bảo k_scales align với feats
+        for scale_idx in range(num_scales):
+            
+            # 1. Nếu layer này nằm trong danh sách cần tính -> Tính K từ stats
+            if scale_idx in batch_stats:
+                avg_lower = torch.stack(batch_stats[scale_idx]['lower']).mean(dim=0)
+                avg_upper = torch.stack(batch_stats[scale_idx]['upper']).mean(dim=0)
+                
+                r = avg_upper - avg_lower
+                
+                k_tensor = torch.zeros_like(r)
+                mask = r > 1e-6
+                k_tensor[mask] = numerator / r[mask]
+                k_tensor[~mask] = 1.0
+                
+                log_msg(self.logger, f"Scale {scale_idx}: Calculated Mean K={k_tensor.mean():.4f}")
+            
+            # 2. Nếu layer này bị bỏ qua -> Gán K mặc định = 1.0 (Dummy)
+            else:
+                # Cần lấy số channel chuẩn để tạo dummy tensor đúng kích thước
+                # Ta tạm thời tạo tensor 1 phần tử, vì optimize_parameters sẽ không dùng đến nó
+                # Hoặc an toàn nhất là ta không cần quan tâm shape nếu code optimize đã check `idx in apply_indices`
+                k_tensor = torch.tensor([1.0]) 
+                log_msg(self.logger, f"Scale {scale_idx}: Skipped (Default K=1.0)")
 
-        for scale_idx in sorted(all_features_by_scale.keys()):
-            full_features = torch.cat(all_features_by_scale[scale_idx], dim=0)
-            N, C, H, W = full_features.shape
-            
-            # Reshape (C, -1) để tính percentile cho từng channel
-            feature_np = full_features.permute(1, 0, 2, 3).reshape(C, -1).numpy()
-            
-            k_list_scale = []
-            for c in range(C):
-                channel_data = feature_np[c]
-                lower = np.percentile(channel_data, tail)
-                upper = np.percentile(channel_data, 100 - tail)
-                r = upper - lower
-                k = numerator / r if r > 1e-6 else 1.0
-                k_list_scale.append(k)
-            
-            # Tạo tensor K (1, C, 1, 1) và đưa vào ParameterList
-            k_tensor = torch.tensor(k_list_scale, dtype=torch.float32).view(1, -1, 1, 1).cuda()
+            # Reshape để broadcast [1, C, 1, 1] nếu cần, hoặc giữ nguyên
+            if k_tensor.numel() > 1:
+                k_tensor = k_tensor.view(1, -1, 1, 1).cuda()
+            else:
+                k_tensor = k_tensor.cuda()
+
+            # Lưu vào model
             param = torch.nn.Parameter(k_tensor, requires_grad=False)
             model_ref.k_scales.append(param)
-            
-            log_msg(self.logger, f"Scale {scale_idx}: Mean K={k_tensor.mean():.4f}")
 
         model_ref.is_k_calculated = True
-        del all_features_by_scale, full_features, feature_np
+        
+        del batch_stats
         torch.cuda.empty_cache()
         
     def optimize_parameters(self):

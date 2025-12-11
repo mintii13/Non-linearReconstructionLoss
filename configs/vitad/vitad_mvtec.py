@@ -14,7 +14,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		cfg_model_vitad.__init__(self)
 
 		self.stats_config = dict(
-			ci_ratio=90,
+			ci_ratio=88,
 			activation_type='sigmoid',
 			enabled=True
 		)
@@ -115,7 +115,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		self.wandb = Namespace()
 		self.wandb.enabled = True
 		self.wandb.project = "Ader_MVTec"
-		self.wandb.name = "Vitad_2LastSigmoidChannel90_100"
+		self.wandb.name = "Vitad_LastSigmoidChannel88_100"
 		self.wandb.tags = ["mvtec", "baseline", "replica"]
 		self.wandb.notes = "baseline with sigmoid channel."
 		self.wandb.mode = "online"

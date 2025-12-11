@@ -442,7 +442,7 @@ class ViTAD(nn.Module):
 			num_scales = len(feats_t)
 			new_feats_t = []
 			for i in range(num_scales):
-				if i == num_scales - 2: # Kiểm tra xem có phải là feature cuối cùng (sâu nhất) không
+				if i == num_scales - 1: # Kiểm tra xem có phải là feature cuối cùng (sâu nhất) không
 					# Áp dụng K và Activation cho feature sâu nhất
 					new_feats_t.append(act_fn(k_list[i] * feats_t[i]))
 				else:
@@ -451,7 +451,7 @@ class ViTAD(nn.Module):
 			feats_t = new_feats_t
 			new_feats_s = []
 			for i in range(num_scales):
-				if i == num_scales - 2: # Kiểm tra xem có phải là feature cuối cùng (sâu nhất) không
+				if i == num_scales - 1: # Kiểm tra xem có phải là feature cuối cùng (sâu nhất) không
 					# Áp dụng K và Activation cho feature sâu nhất
 					new_feats_s.append(act_fn(k_list[i] * feats_s[i]))
 				else:
