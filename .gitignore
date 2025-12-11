@@ -7,7 +7,7 @@ experiments/*
 .venv/*
 
 *.png
-
+*.JPG
 .history
 # PyTorch
 *.pth

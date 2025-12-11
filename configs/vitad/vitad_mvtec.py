@@ -14,7 +14,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		cfg_model_vitad.__init__(self)
 
 		self.stats_config = dict(
-			ci_ratio=88,
+			ci_ratio=90,
 			activation_type='sigmoid',
 			enabled=True
 		)

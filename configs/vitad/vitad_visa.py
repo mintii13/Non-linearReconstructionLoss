@@ -24,11 +24,12 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 		self.lr = 1e-4 * self.batch_train / 8
 		self.weight_decay = 0.0001
 		self.metrics = [
-			'mAUROC_sp_max', 'mAP_sp_max', 'mF1_max_sp_max',
-			'mAUPRO_px',
-			'mAUROC_px', 'mAP_px', 'mF1_max_px',
-			'mF1_px_0.2_0.8_0.1', 'mAcc_px_0.2_0.8_0.1', 'mIoU_px_0.2_0.8_0.1',
-			'mIoU_max_px',
+			'mAUROC_sp_max', 'mAUROC_px', 
+			# 'mAP_sp_max', 'mF1_max_sp_max',
+			# 'mAUPRO_px',
+			# 'mAP_px', 'mF1_max_px',
+			# 'mF1_px_0.2_0.8_0.1', 'mAcc_px_0.2_0.8_0.1', 'mIoU_px_0.2_0.8_0.1',
+			# 'mIoU_max_px',
 		]
 
 		# ==> data
@@ -91,7 +92,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 
 		# ==> loss
 		self.loss.loss_terms = [
-			dict(type='CosLoss', name='cos', avg=False, lam=1.0),
+			dict(type='L2Loss', name='pixel', lam=1.0),
 		]
 
 		# ==> logging
@@ -100,9 +101,23 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_vitad):
 			dict(name='data_t', fmt=':>5.3f'),
 			dict(name='optim_t', fmt=':>5.3f'),
 			dict(name='lr', fmt=':>7.6f'),
-			dict(name='cos', suffixes=[''], fmt=':>5.3f', add_name='avg'),
+			dict(name='pixel', suffixes=[''], fmt=':>5.3f', add_name='avg'),
 		]
 		self.logging.log_terms_test = [
 			dict(name='batch_t', fmt=':>5.3f', add_name='avg'),
-			dict(name='cos', suffixes=[''], fmt=':>5.3f', add_name='avg'),
+			dict(name='pixel', suffixes=[''], fmt=':>5.3f', add_name='avg'),
 		]
+		self.wandb = Namespace()
+		self.wandb.enabled = True
+		self.wandb.project = "Ader_VisA"
+		self.wandb.name = "Vitad_LastSigmoidChannel90_100"
+		self.wandb.tags = ["mvtec", "baseline", "replica"]
+		self.wandb.notes = "baseline with sigmoid channel."
+		self.wandb.mode = "online"
+		self.wandb.group = None
+		self.wandb.job_type = "train"
+		self.wandb.resume = "allow"
+		self.wandb.run_id = None
+		self.wandb.dir = None
+		self.wandb.login = True
+		self.wandb.api_key = "0f2ca680372a916c31aab5ede7bbefab410fe503"

@@ -16,7 +16,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 		self.stats_config = dict(
 			ci_ratio=90, 
 			activation_type='sigmoid',
-			enabled=False,
+			enabled=True,
 			apply_indices=[2]   
 		)
 

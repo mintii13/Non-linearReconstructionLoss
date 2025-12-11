@@ -126,32 +126,28 @@ class InvADTrainer(BaseTrainer):
                 
                 self.set_input(data)
                 feats = model_ref.net_encoder(self.imgs) 
-                num_scales = len(feats) # Cập nhật số lượng scale thực tế (ví dụ 3)
+                num_scales = len(feats) 
                 
                 for scale_idx, feat in enumerate(feats):
-                    # === TỐI ƯU: CHỈ TÍNH TOÁN CHO LAYER CẦN THIẾT ===
                     if scale_idx not in apply_indices:
                         continue 
-                    # =================================================
                     
                     if scale_idx not in batch_stats:
                         batch_stats[scale_idx] = {'lower': [], 'upper': []}
                     
-                    # Tính quantile trên GPU (rất nhanh, không tốn RAM hệ thống)
                     # Reshape: [B, C, H, W] -> [C, -1]
                     feat_flat = feat.permute(1, 0, 2, 3).reshape(feat.shape[1], -1)
                     
                     lower_val = torch.quantile(feat_flat, q_lower, dim=1)
                     upper_val = torch.quantile(feat_flat, q_upper, dim=1)
                     
-                    # Chỉ lưu vector thống kê [C] về CPU (vài KB)
                     batch_stats[scale_idx]['lower'].append(lower_val.cpu())
                     batch_stats[scale_idx]['upper'].append(upper_val.cpu())
 
         # Reset ParameterList
         model_ref.k_scales = torch.nn.ParameterList()
         
-        # Duyệt qua tất cả các scale index (0, 1, 2...) để đảm bảo k_scales align với feats
+        # Duyệt qua tất cả các scale index
         for scale_idx in range(num_scales):
             
             # 1. Nếu layer này nằm trong danh sách cần tính -> Tính K từ stats
@@ -160,29 +156,44 @@ class InvADTrainer(BaseTrainer):
                 avg_upper = torch.stack(batch_stats[scale_idx]['upper']).mean(dim=0)
                 
                 r = avg_upper - avg_lower
-                
+
+                # === DEBUG PRINT START: STATS TRƯỚC KHI TÍNH K ===
+                if self.master:
+                    print(f"\n{'='*20} LAYER {scale_idx} RAW STATS {'='*20}")
+                    print(f">> Lower Bound (q={q_lower:.3f}):")
+                    print(f"   Mean: {avg_lower.mean().item():.6f} | Min: {avg_lower.min().item():.6f} | Max: {avg_lower.max().item():.6f}")
+                    
+                    print(f">> Upper Bound (q={q_upper:.3f}):")
+                    print(f"   Mean: {avg_upper.mean().item():.6f} | Min: {avg_upper.min().item():.6f} | Max: {avg_upper.max().item():.6f}")
+                    
+                    print(f">> Range R (Upper - Lower):")
+                    # R rất nhỏ -> K rất lớn -> Dễ bão hòa Sigmoid
+                    print(f"   Mean: {r.mean().item():.6f} | Min: {r.min().item():.6f} | Max: {r.max().item():.6f}")
+                    
+                    # Đếm số lượng kênh có Range gần bằng 0 (nguy hiểm)
+                    zero_range_count = (r < 1e-6).sum().item()
+                    if zero_range_count > 0:
+                        print(f"!! WARNING: Có {zero_range_count} channels có Range ~ 0 (sẽ bị gán K=1.0)")
+                    print(f"{'='*60}")
+                # =================================================
+
                 k_tensor = torch.zeros_like(r)
                 mask = r > 1e-6
                 k_tensor[mask] = numerator / r[mask]
-                k_tensor[~mask] = 1.0
+                k_tensor[~mask] = 1.0 # Default cho kênh chết
                 
-                log_msg(self.logger, f"Scale {scale_idx}: Calculated Mean K={k_tensor.mean():.4f}")
+                log_msg(self.logger, f"Scale {scale_idx}: Calculated Mean K={k_tensor.mean():.4f} (Max K={k_tensor.max():.4f})")
             
-            # 2. Nếu layer này bị bỏ qua -> Gán K mặc định = 1.0 (Dummy)
+            # 2. Nếu layer này bị bỏ qua
             else:
-                # Cần lấy số channel chuẩn để tạo dummy tensor đúng kích thước
-                # Ta tạm thời tạo tensor 1 phần tử, vì optimize_parameters sẽ không dùng đến nó
-                # Hoặc an toàn nhất là ta không cần quan tâm shape nếu code optimize đã check `idx in apply_indices`
                 k_tensor = torch.tensor([1.0]) 
                 log_msg(self.logger, f"Scale {scale_idx}: Skipped (Default K=1.0)")
 
-            # Reshape để broadcast [1, C, 1, 1] nếu cần, hoặc giữ nguyên
             if k_tensor.numel() > 1:
                 k_tensor = k_tensor.view(1, -1, 1, 1).cuda()
             else:
                 k_tensor = k_tensor.cuda()
 
-            # Lưu vào model
             param = torch.nn.Parameter(k_tensor, requires_grad=False)
             model_ref.k_scales.append(param)
 
