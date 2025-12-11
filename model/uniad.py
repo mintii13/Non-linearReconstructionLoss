@@ -763,7 +763,7 @@ class UniAD(nn.Module):
 		self.net_ad = UniAD_decoder(inplanes=model_decoder['outplanes'], instrides=model_decoder['instrides'], feature_size=model_decoder['feature_size'],
 							feature_jitter=Namespace(**{'scale': 20.0, 'prob': 1.0}),
 							neighbor_mask=Namespace(**{'neighbor_size': model_decoder['neighbor_size'], 'mask': [True, True, True]}),
-							hidden_dim=256, pos_embed_type='learned', save_recon=Namespace(**{'save_dir': 'result_recon'}),
+							hidden_dim=512, pos_embed_type='learned', save_recon=Namespace(**{'save_dir': 'result_recon'}),
 							initializer={'method': 'xavier_uniform'}, nhead=8, num_encoder_layers=4,
 							num_decoder_layers=4, dim_feedforward=1024, dropout=0.1, activation='relu',
 							normalize_before=False)
