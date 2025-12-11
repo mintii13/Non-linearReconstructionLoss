@@ -4,9 +4,14 @@ from util.net import init_training
 from util.util import run_pre, init_checkpoint
 from trainer import get_trainer
 import warnings
+import torch
 warnings.filterwarnings("ignore")
 
-
+def seed_everything(seed=42):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 def main():
 	parser = argparse.ArgumentParser()
 	# parser.add_argument('-c', '--cfg_path', default='configs/rd_mvtec_debug.py')
@@ -28,4 +33,5 @@ def main():
 
 
 if __name__ == '__main__':
+	seed_everything(42)
 	main()
