@@ -19,19 +19,19 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 		# === 1. ĐIỀU CHỈNH EPOCH VÀ VALIDATE ===
 		self.epoch_full = 600 # Tổng số epoch
 		self.warmup_epochs = 0
-		self.test_per_epoch = 300 # Validate mỗi 100 epoch
-		self.test_start_epoch = 100 # Bắt đầu validate từ epoch 1
+		self.test_per_epoch = 50 # Validate mỗi 100 epoch
+		self.test_start_epoch = 50 # Bắt đầu validate từ epoch 1
 		
 		self.batch_train = 8
 		self.batch_test_per = 8
 		self.lr = 1e-4 * self.batch_train / 8
 		self.weight_decay = 0.0001
 		self.metrics = [
-			'mAUROC_sp_max', 
+			'mAUROC_sp_max', 'mAUROC_px',
 			'mAP_sp_max', 
 			'mF1_max_sp_max',
 			'mAUPRO_px',
-			'mAUROC_px', 'mAP_px', 'mF1_max_px',
+			'mAP_px', 'mF1_max_px',
 			# 'mF1_px_0.2_0.8_0.1', 'mAcc_px_0.2_0.8_0.1', 'mIoU_px_0.2_0.8_0.1',
 			# 'mIoU_max_px',
 		]
@@ -127,7 +127,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 		self.wandb.enabled = True
 		self.wandb.project = "Ader_MVTec"
 		self.wandb.entity = None 
-		self.wandb.name = 'UniAD_600e_val100e_step480'
+		self.wandb.name = 'UniAD_SigmoidChannel90_600_seede42'
 		self.wandb.tags = ["mvtec", "anomaly-detection"]
 		self.wandb.notes = "UniAD training on MVTec-AD dataset with 600 epochs and validation every 100 epochs."
 		self.wandb.mode = "online"
