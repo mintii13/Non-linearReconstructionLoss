@@ -12,14 +12,14 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         cfg_dataset_default.__init__(self)
         cfg_model_uniad.__init__(self)
 
-        self.seed = 133 
-        self.size = 224
+        self.seed = 42
+        self.size = 256
         
         # === Trainer Settings ===
-        self.epoch_full = 500
+        self.epoch_full = 600
         self.warmup_epochs = 0
-        self.test_per_epoch = 50
-        self.test_start_epoch = 50
+        self.test_per_epoch = 100
+        self.test_start_epoch = 100
         
         self.batch_train = 8
         self.batch_test_per = 8
@@ -28,9 +28,10 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.weight_decay = 0.0001
         
         self.metrics = [
-            'mAUROC_sp_max', 'mAP_sp_max', 'mF1_max_sp_max',
+            'mAUROC_sp_max', 'mAUROC_px',
+            'mAP_sp_max', 'mF1_max_sp_max',
             # 'mAUPRO_px', 
-            'mAUROC_px', 'mAP_px', 'mF1_max_px',
+            'mAP_px', 'mF1_max_px',
         ]
 
         # ==> Data
@@ -131,7 +132,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.enabled = True
         self.wandb.project = "Ader_MVTec" 
         self.wandb.entity = None 
-        self.wandb.name = 'Lnorm_SigmoidChannel90_500_lr0.0002_224_512dim'
+        self.wandb.name = 'Lnorm_SigmoidChannel90_600_lr0.0002_256_512dim_s42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"

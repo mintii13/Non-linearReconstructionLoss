@@ -16,7 +16,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 		self.stats_config = dict(
 			ci_ratio=90, 
 			activation_type='sigmoid',
-			enabled=True,
+			enabled=False,
 			apply_indices=[2]   
 		)
 
@@ -26,8 +26,8 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 		self.warmup_epochs = 0
 		self.test_start_epoch = 10
 		self.test_per_epoch = 10
-		self.batch_train = 32
-		self.batch_test_per = 32
+		self.batch_train = 8
+		self.batch_test_per = 8
 		self.lr = 0.001 * self.batch_train / 8
 		# self.lr = 1e-4 * self.batch_train / 8
 		self.weight_decay = 0.0001
@@ -144,7 +144,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_invad):
 		self.wandb = Namespace()
 		self.wandb.enabled = True
 		self.wandb.project = "Ader_MVTec"
-		self.wandb.name = "InvAD_LastSigmoidChannel90_100"
+		self.wandb.name = "InvAD_noSigmoidChannel90_100"
 		self.wandb.tags = ["mvtec", "invad", "sigmoid"]
 		self.wandb.notes = "InvAD with sigmoid suppression on layers [2]."
 		self.wandb.mode = "online"
