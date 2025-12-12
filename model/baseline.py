@@ -98,16 +98,11 @@ class Baseline(nn.Module):
         self.stats_config = stats_config
         self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
         
-        # Xử lý K values
-        global k_list 
-        k_list = stats_config.get('k_values_272', None) if stats_config else None
+        # Xử lý K value
+        k_value = 1.0
         
-        if k_list is None or len(k_list) != self.input_channel_dim:
-            k_tensor = torch.ones(self.input_channel_dim, dtype=torch.float32)
-        else:
-            k_tensor = torch.tensor(k_list, dtype=torch.float32)
-            
-        self.channel_k_values = nn.Parameter(k_tensor, requires_grad=False)
+        k_tensor = torch.tensor([k_value], dtype=torch.float32) # Dùng tensor 1 phần tử 
+        self.k_value = nn.Parameter(k_tensor, requires_grad=False)
         self.upsample = nn.UpsamplingBilinear2d(scale_factor=instrides[0])
 
         initialize_from_cfg(self, initializer)
@@ -136,10 +131,6 @@ class Baseline(nn.Module):
         
         feature_tokens = self.input_proj(feature_tokens)
         
-        k_channel_values = self.channel_k_values.to(feature_align.device)
-        k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
-        k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
-        
         activation_fn = self._get_activation_fn_from_config(self.activation_type)
         feature_tokens = F.layer_norm(feature_tokens, feature_tokens.shape[-1:])
         
@@ -152,18 +143,16 @@ class Baseline(nn.Module):
 
         if is_stats_enabled:
             # Lấy K values
-            k_channel_values = self.channel_k_values.to(feature_align.device)
-            k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
-            k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
+            k_value = self.k_value.to(feature_align.device)
             
             # Lấy hàm activation (Sigmoid)
             activation_fn = self._get_activation_fn_from_config(self.activation_type)
             
             # Áp dụng K và Sigmoid cho Reconstruction
-            feature_rec_tokens = activation_fn(feature_rec_tokens * k_token_aligned)
+            feature_rec_tokens = activation_fn(feature_rec_tokens * k_value)
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
             
-            feature_align = activation_fn(feature_align * k_spatial_aligned)
+            feature_align = activation_fn(feature_align * k_value)
             
         else:
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
@@ -408,8 +397,8 @@ class BaselineWrapper(nn.Module):
     def activation_type(self):
         return self.net_ad.activation_type
     @property
-    def k_values(self):
-        return self.net_ad.channel_k_values
+    def k_value(self):
+        return self.net_ad.k_value
 
     def freeze_layer(self, module):
         module.eval()
@@ -428,13 +417,13 @@ class BaselineWrapper(nn.Module):
     def forward(self, imgs):
         feats_backbone = self.net_backbone(imgs)
         feats_merge = self.net_merge(feats_backbone)
-        # 1. Permute
-        feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
-        # 2. Norm
-        feats_norm = self.net_norm(feats_norm)
-        # 3. Permute back
-        feats_norm = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
-        feats_norm = feats_norm.detach()
+        # # 1. Permute
+        # feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
+        # # 2. Norm
+        # feats_norm = self.net_norm(feats_norm)
+        # # 3. Permute back
+        # feats_norm = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
+        feats_norm = feats_merge.detach()
         
         output_dict = self.net_ad(feats_norm)
         

@@ -42,7 +42,7 @@ class ViTADTrainer(BaseTrainer):
         else:
             self.wandb_run = None
 
-    def calculate_k_values(self):
+    def calculate_k_value(self):
         """
         Tính toán giá trị K cho từng channel của từng scale (Multi-scale Statistics)
         """
@@ -171,7 +171,7 @@ class ViTADTrainer(BaseTrainer):
         
         # === TÍNH TOÁN K VALUES TẠI ĐÂY ===
         if self.epoch == 0 and self.iter == 0:
-            self.calculate_k_values()
+            self.calculate_k_value()
             
             # Broadcast K values nếu dùng DDP
             if self.cfg.dist:

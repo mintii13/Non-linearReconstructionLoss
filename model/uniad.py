@@ -779,7 +779,7 @@ class UniAD(nn.Module):
 		else:
 			self.activation_type = 'sigmoid'
 		out_channels = model_decoder['outplanes'][0]
-		self.register_buffer('k_values', torch.ones(out_channels, dtype=torch.float32))
+		self.register_buffer('k_value', torch.ones(out_channels, dtype=torch.float32))
 
 	def _get_activation(self):
 		if self.activation_type == 'sigmoid':
@@ -809,7 +809,7 @@ class UniAD(nn.Module):
 		feature_align, feature_rec, _ = self.net_ad(feats_merge)
 		if self.stats_config and self.stats_config.get('enabled', False):
 			# Reshape K để broadcast: (1, C, 1, 1)
-			k_spatial = self.k_values.view(1, -1, 1, 1)
+			k_spatial = self.k_value.view(1, -1, 1, 1)
 			act_fn = self._get_activation()
 			
 			# Scale và Activation

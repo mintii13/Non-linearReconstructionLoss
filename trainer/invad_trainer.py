@@ -88,7 +88,7 @@ class InvADTrainer(BaseTrainer):
                 dispatch_clip_grad(self.net.parameters(), value=self.cfg.loss.clip_grad)
             optim.step()
 
-    def calculate_k_values(self):
+    def calculate_k_value(self):
         if not self.master:
             return
 
@@ -274,7 +274,7 @@ class InvADTrainer(BaseTrainer):
         
         # === ADDED: Calculate K at Epoch 0 ===
         if self.epoch == 0 and self.iter == 0:
-            self.calculate_k_values()
+            self.calculate_k_value()
             if self.cfg.dist:
                 torch.distributed.barrier()
         # =====================================

@@ -24,8 +24,8 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # === Trainer Settings ===
         self.epoch_full = 600
         self.warmup_epochs = 0
-        self.test_per_epoch = 100
-        self.test_start_epoch = 100
+        self.test_per_epoch = 50
+        self.test_start_epoch = 50
         
         self.batch_train = 8
         self.batch_test_per = 8
@@ -35,9 +35,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         self.metrics = [
             'mAUROC_sp_max', 'mAUROC_px',
-            'mAP_sp_max', 'mF1_max_sp_max',
+            # 'mAP_sp_max', 'mF1_max_sp_max',
             # 'mAUPRO_px', 
-            'mAP_px', 'mF1_max_px',
+            # 'mAP_px', 'mF1_max_px',
         ]
 
         # ==> Data
@@ -129,9 +129,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # === WandB ===
         self.wandb = Namespace()
         self.wandb.enabled = True
-        self.wandb.project = "Ader_MVTec" 
+        self.wandb.project = "Ader_MVTec_Global" 
         self.wandb.entity = None 
-        self.wandb.name = 'BaselineLnorm_SigmoidChannel90_600_lr0.0002_512dim_seede42'
+        self.wandb.name = 'Baseline_Sigmoid90_600_lr0.0002_512_seede42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"
