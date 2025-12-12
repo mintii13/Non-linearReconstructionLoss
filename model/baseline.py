@@ -71,9 +71,10 @@ class Baseline(nn.Module):
         self.save_recon = save_recon
         self.input_channel_dim = inplanes[0]
         self.hidden_dim = hidden_dim
-
+        self.pre_norm = nn.LayerNorm(inplanes[0], elementwise_affine=False)
         self.input_proj = nn.Linear(inplanes[0], hidden_dim)
-        
+        self.is_stats_enabled = self.stats_config is not None and self.stats_config.get('enabled', False)
+        self.activation_fn = self._get_activation_fn_from_config(self.activation_type)
         encoder_layer = TransformerEncoderLayer(
             hidden_dim, 
             kwargs.get('nhead', 8), 
@@ -130,6 +131,10 @@ class Baseline(nn.Module):
         return feature_tokens
     
     def forward(self, feature_align):
+        feature_align = feature_align.permute(0, 2, 3, 1) # -> B, H, W, C
+        # 2. Áp dụng LayerNorm (ép về mean 0)
+        feature_align = self.pre_norm(feature_align)
+        feature_align = feature_align.permute(0, 3, 1, 2) # -> B, C, H, W
         # feature_align: B x C X H x W
         feature_tokens = rearrange(feature_align, "b c h w -> (h w) b c")
         
@@ -150,13 +155,19 @@ class Baseline(nn.Module):
         decoded_tokens = self.decoder(encoded_tokens, encoded_tokens, pos=pos_embed)
         
         feature_rec_tokens = self.output_proj(decoded_tokens)
-        feature_rec_tokens = activation_fn(feature_rec_tokens * k_token_aligned) 
-
-        feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
-
-        # Compute prediction
-        if k_list is not None or True: # Force activation on align feature for comparison
-            feature_align = activation_fn(feature_align * k_spatial_aligned) 
+        if self.is_stats_enabled:
+            # Lấy K values
+            k_channel_values = self.channel_k_values.to(feature_align.device)
+            k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
+            k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
+            # Áp dụng K và Sigmoid cho Reconstruction
+            feature_rec_tokens = self.activation_fn(feature_rec_tokens * k_token_aligned)
+            feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
+            feature_target = self.activation_fn(feature_align * k_spatial_aligned)
+            
+        else:
+            feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
+            feature_target = feature_align
         
         pred = torch.sqrt(torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True))
         pred = self.upsample(pred)

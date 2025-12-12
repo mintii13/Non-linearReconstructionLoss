@@ -12,6 +12,12 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         cfg_dataset_default.__init__(self)
         cfg_model_uniad.__init__(self)
 
+        # Stats Config
+        self.stats_config = dict(
+            ci_ratio=90,            
+            activation_type='sigmoid',
+            enabled=True             
+        )
         self.seed = 42
         self.size = 256
         
@@ -67,13 +73,6 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             instrides=[16],
             feature_size=[self.size // 16, self.size // 16],
             neighbor_size=[self.size // 32, self.size // 32]
-        )
-        
-        # Stats Config
-        self.stats_config = dict(
-            ci_ratio=90,            
-            activation_type='sigmoid',
-            enabled=True             
         )
 
         # Model Config
