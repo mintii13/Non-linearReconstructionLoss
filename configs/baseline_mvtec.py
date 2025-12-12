@@ -131,7 +131,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.enabled = True
         self.wandb.project = "Ader_MVTec" 
         self.wandb.entity = None 
-        self.wandb.name = 'Lnorm_SigmoidChannel90_600_lr0.0002_256_512dim_s42'
+        self.wandb.name = 'BaselineLnorm_SigmoidChannel90_600_lr0.0002_512dim_seede42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"

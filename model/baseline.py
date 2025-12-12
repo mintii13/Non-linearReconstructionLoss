@@ -71,10 +71,7 @@ class Baseline(nn.Module):
         self.save_recon = save_recon
         self.input_channel_dim = inplanes[0]
         self.hidden_dim = hidden_dim
-        self.pre_norm = nn.LayerNorm(inplanes[0], elementwise_affine=False)
         self.input_proj = nn.Linear(inplanes[0], hidden_dim)
-        self.is_stats_enabled = self.stats_config is not None and self.stats_config.get('enabled', False)
-        self.activation_fn = self._get_activation_fn_from_config(self.activation_type)
         encoder_layer = TransformerEncoderLayer(
             hidden_dim, 
             kwargs.get('nhead', 8), 
@@ -131,10 +128,6 @@ class Baseline(nn.Module):
         return feature_tokens
     
     def forward(self, feature_align):
-        feature_align = feature_align.permute(0, 2, 3, 1) # -> B, H, W, C
-        # 2. Áp dụng LayerNorm (ép về mean 0)
-        feature_align = self.pre_norm(feature_align)
-        feature_align = feature_align.permute(0, 3, 1, 2) # -> B, C, H, W
         # feature_align: B x C X H x W
         feature_tokens = rearrange(feature_align, "b c h w -> (h w) b c")
         
@@ -155,19 +148,26 @@ class Baseline(nn.Module):
         decoded_tokens = self.decoder(encoded_tokens, encoded_tokens, pos=pos_embed)
         
         feature_rec_tokens = self.output_proj(decoded_tokens)
-        if self.is_stats_enabled:
+        is_stats_enabled = self.stats_config is not None and self.stats_config.get('enabled', False)
+
+        if is_stats_enabled:
             # Lấy K values
             k_channel_values = self.channel_k_values.to(feature_align.device)
             k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
             k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
+            
+            # Lấy hàm activation (Sigmoid)
+            activation_fn = self._get_activation_fn_from_config(self.activation_type)
+            
             # Áp dụng K và Sigmoid cho Reconstruction
-            feature_rec_tokens = self.activation_fn(feature_rec_tokens * k_token_aligned)
+            feature_rec_tokens = activation_fn(feature_rec_tokens * k_token_aligned)
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
-            feature_target = self.activation_fn(feature_align * k_spatial_aligned)
+            
+            feature_align = activation_fn(feature_align * k_spatial_aligned)
             
         else:
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
-            feature_target = feature_align
+            feature_align = feature_align
         
         pred = torch.sqrt(torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True))
         pred = self.upsample(pred)
@@ -180,17 +180,7 @@ class Baseline(nn.Module):
         }
         return output_dict
 
-# ==========================================
-# 3. Helper Classes (Transformer parts)
-# ==========================================
-# ... [COPY TOÀN BỘ CÁC CLASS PHỤ TRỢ TỪ FILE BẠN GỬI VÀO ĐÂY] ...
-# TransformerEncoder, TransformerDecoder, TransformerEncoderLayer, 
-# TransformerMemoryDecoderLayer, PositionEmbeddingSine, PositionEmbeddingLearned, 
-# build_position_embedding, _get_clones, _get_activation_fn
-# (Để ngắn gọn tôi không paste lại hết ở đây, bạn hãy copy paste phần đó vào)
 
-# ... (Paste Transformer Utils here) ... 
-# VÍ DỤ:
 class TransformerEncoder(nn.Module):
     def __init__(self, encoder_layer, num_layers, norm=None):
         super().__init__()
@@ -390,7 +380,7 @@ class BaselineWrapper(nn.Module):
             instrides=[2, 4, 8, 16], 
             outstrides=[16]
         )
-        
+        self.net_norm = nn.LayerNorm(model_decoder['outplanes'][0], elementwise_affine=False)
         # Khởi tạo Baseline
         self.net_ad = Baseline(
             inplanes=model_decoder['outplanes'], 
@@ -398,7 +388,7 @@ class BaselineWrapper(nn.Module):
             feature_size=model_decoder['feature_size'],
             feature_jitter=Namespace(**{'scale': 20.0, 'prob': 1.0}),
             neighbor_mask=Namespace(**{'neighbor_size': model_decoder['neighbor_size'], 'mask': [True, True, True]}),
-            hidden_dim=256, 
+            hidden_dim=512, 
             pos_embed_type='learned', 
             save_recon=Namespace(**{'save_dir': 'result_recon'}),
             initializer={'method': 'xavier_uniform'}, 
@@ -438,10 +428,15 @@ class BaselineWrapper(nn.Module):
     def forward(self, imgs):
         feats_backbone = self.net_backbone(imgs)
         feats_merge = self.net_merge(feats_backbone)
-        feats_merge = feats_merge.detach()
+        # 1. Permute
+        feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
+        # 2. Norm
+        feats_norm = self.net_norm(feats_norm)
+        # 3. Permute back
+        feats_norm = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
+        feats_norm = feats_norm.detach()
         
-        # Gọi Baseline, nhận về dict
-        output_dict = self.net_ad(feats_merge)
+        output_dict = self.net_ad(feats_norm)
         
         # Tách dict thành tuple để trả về cho Trainer
         feature_align = output_dict['feature_align']

@@ -89,18 +89,12 @@ class UniADTrainer(BaseTrainer):
 				
 				self.set_input(data)
 				
-				# Gọi backbone và merge để lấy feature gốc (chưa qua sigmoid)
-				# Vì forward của UniAD (đã sửa) trả về sigmoid features nếu buffer đã set,
-				# nhưng lúc này buffer đang là 1.0 nên ta lấy output feature_align (feats_t) là được.
-				# Tuy nhiên, để chính xác nhất, ta nên lấy feature thô. 
-				# Trong code model sửa đổi, feature_align = activation(raw * k). 
-				# Ban đầu k=1, activation=sigmoid. -> Output là sigmoid(raw). 
-				# -> Không tính được min/max chuẩn của raw.
-				
-				# CÁCH KHẮC PHỤC: Truy cập trực tiếp sub-modules để lấy Raw Features
 				feats_backbone = model_ref.net_backbone(self.imgs)
 				feats_merge = model_ref.net_merge(feats_backbone)
-				all_features.append(feats_merge.detach().cpu())
+				feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
+				feats_norm = model_ref.net_norm(feats_norm)   
+				feats_norm = feats_norm.permute(0, 3, 1, 2)
+				all_features.append(feats_norm.detach().cpu())
 
 		# Gộp tất cả features: N x C x H x W
 		full_features = torch.cat(all_features, dim=0)
