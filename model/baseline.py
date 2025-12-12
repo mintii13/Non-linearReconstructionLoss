@@ -377,7 +377,7 @@ class BaselineWrapper(nn.Module):
             feature_size=model_decoder['feature_size'],
             feature_jitter=Namespace(**{'scale': 20.0, 'prob': 1.0}),
             neighbor_mask=Namespace(**{'neighbor_size': model_decoder['neighbor_size'], 'mask': [True, True, True]}),
-            hidden_dim=256, 
+            hidden_dim=512, 
             pos_embed_type='learned', 
             save_recon=Namespace(**{'save_dir': 'result_recon'}),
             initializer={'method': 'xavier_uniform'}, 
