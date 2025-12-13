@@ -18,11 +18,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             activation_type='sigmoid',
             enabled=True             
         )
-        self.seed = 43
+        self.seed = 42
         self.size = 256
         
         # === Trainer Settings ===
-        self.epoch_full = 600
+        self.epoch_full = 500
         self.warmup_epochs = 0
         self.test_per_epoch = 50
         self.test_start_epoch = 50
@@ -30,7 +30,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.batch_train = 8
         self.batch_test_per = 8
         
-        self.lr = 2e-4 * self.batch_train / 8 
+        self.lr = 1e-4 * self.batch_train / 8 
         self.weight_decay = 0.0001
         
         self.metrics = [
@@ -128,10 +128,10 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         # === WandB ===
         self.wandb = Namespace()
-        self.wandb.enabled = True
+        self.wandb.enabled = False
         self.wandb.project = "Ader_MVTec_Global" 
         self.wandb.entity = None 
-        self.wandb.name = 'Baseline_Sigmoid90_600_lr0.0002_512_seede42'
+        self.wandb.name = 'Baseline_Sigmoid90_500_lr0.0001_512_seede42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"

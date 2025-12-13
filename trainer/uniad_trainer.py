@@ -394,7 +394,9 @@ class UniADTrainer(BaseTrainer):
 			# In ra bảng tabulate
 			msg = tabulate.tabulate(msg, headers='keys', tablefmt="pipe", floatfmt='.3f', numalign="center", stralign="center", )
 			log_msg(self.logger, f'\n{msg}')
-
+			epoch_msg = f"\n==================== TEST RESULTS (EPOCH {self.epoch}) ===================="
+			print(epoch_msg, flush=True)
+			print(f'\n{msg}', flush=True)
 			# --- GỬI LOG AVG LÊN WANDB ---
 			if self.wandb_run:
 				wandb_metric_log['epoch'] = self.epoch

@@ -16,7 +16,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.stats_config = dict(
             ci_ratio=90,            
             activation_type='sigmoid',
-            enabled=False             
+            enabled=True             
         )
         self.seed = 42
         self.size = 256
@@ -131,7 +131,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.enabled = True
         self.wandb.project = "Ader_VisA_Global" 
         self.wandb.entity = None 
-        self.wandb.name = 'Baseline_noSigmoid90_600_lr0.0001_512_seede42'
+        self.wandb.name = 'Baseline_Sigmoid90_600_lr0.0001_512_seede42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"
