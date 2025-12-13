@@ -91,9 +91,9 @@ class UniADTrainer(BaseTrainer):
 				
 				feats_backbone = model_ref.net_backbone(self.imgs)
 				feats_merge = model_ref.net_merge(feats_backbone)
-				# feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
-				# feats_norm = model_ref.net_norm(feats_norm)   
-				# feats_norm = feats_norm.permute(0, 3, 1, 2)
+				feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
+				feats_norm = model_ref.net_norm(feats_norm)   
+				feats_norm = feats_norm.permute(0, 3, 1, 2)
 				all_features.append(feats_merge.detach().cpu())
 
 		# Gộp tất cả features: N x C x H x W
@@ -399,7 +399,9 @@ class UniADTrainer(BaseTrainer):
 			# In ra bảng tabulate
 			msg = tabulate.tabulate(msg, headers='keys', tablefmt="pipe", floatfmt='.3f', numalign="center", stralign="center", )
 			log_msg(self.logger, f'\n{msg}')
-
+			epoch_msg = f"\n==================== TEST RESULTS (EPOCH {self.epoch}) ===================="
+			print(epoch_msg, flush=True)
+			print(f'\n{msg}', flush=True)
 			# --- GỬI LOG AVG LÊN WANDB ---
 			if self.wandb_run:
 				wandb_metric_log['epoch'] = self.epoch
