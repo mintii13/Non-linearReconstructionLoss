@@ -72,7 +72,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             outplanes=[sum(inplanes)],
             instrides=[16],
             feature_size=[self.size // 16, self.size // 16],
-            neighbor_size=[self.size // 32, self.size // 32]
+            neighbor_size=[self.size // 32, self.size // 32],
+            memory_mode='both',           # 'channel', 'spatial', 'both', 'none'
+            fusion_mode='concat',         # 'concat', 'add', 'gate', ...
+            channel_memory_size=256,
+            spatial_memory_size=256,
         )
 
         # Model Config
@@ -131,7 +135,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.enabled = True
         self.wandb.project = "Ader_MVTec" 
         self.wandb.entity = None 
-        self.wandb.name = 'BaselineLnorm_SigmoidChannel90_600_lr0.0002_512dim_seede42'
+        self.wandb.name = 'BaselineLnorm_SigmoidChannel90_600_256_256_mask60%_concat_lr0.0002_512dim_seede42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"

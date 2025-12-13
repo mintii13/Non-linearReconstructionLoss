@@ -14,6 +14,174 @@ import numpy as np
 from model import get_model, MODEL
 
 # ==========================================
+# 0. Memory Modules (FIXED)
+# ==========================================
+
+class ChannelMemoryModule(nn.Module):
+    """
+    Channel Memory Module - Feature-wise processing with Q/K/V projections
+    Input/Output Shape: (L, B, C) where L=H*W
+    """
+    def __init__(self, mem_dim, feature_dim, **kwargs):
+        super(ChannelMemoryModule, self).__init__()
+        
+        self.mem_dim = mem_dim
+        self.feature_dim = feature_dim
+        self.scale = 1.0 / math.sqrt(feature_dim)
+        
+        self.memory = nn.Parameter(torch.randn(mem_dim, feature_dim))
+        nn.init.normal_(self.memory, mean=0, std=0.1)
+        
+        self.query_proj = nn.Linear(feature_dim, feature_dim, bias=False)
+        self.key_proj = nn.Linear(feature_dim, feature_dim, bias=False)
+        self.value_proj = nn.Linear(feature_dim, feature_dim, bias=False)
+        
+    def forward(self, input_tokens):
+        # input_tokens: [H*W, B, C]
+        N_tokens, batch_size, feature_dim = input_tokens.shape
+        
+        # Flatten: [H*W*B, C]
+        input_flat = input_tokens.view(N_tokens * batch_size, feature_dim)
+        
+        queries = self.query_proj(input_flat)
+        keys = self.key_proj(self.memory)
+        values = self.value_proj(self.memory)
+        
+        attention_scores = torch.mm(queries, keys.t())
+        
+        if self.training:
+            mask_ratio = 0.6
+            num_masked = int(self.mem_dim * mask_ratio)
+            if num_masked > 0:
+                mask_indices = torch.randperm(self.mem_dim, device=attention_scores.device)[:num_masked]
+                attention_scores[:, mask_indices] = float('-inf')
+
+        attention_scores = attention_scores * self.scale
+        att_weight = F.softmax(attention_scores, dim=1)
+        output_flat = torch.mm(att_weight, values)
+        
+        # Reshape back: [H*W, B, C]
+        output_tokens = output_flat.view(N_tokens, batch_size, feature_dim)
+        
+        return {
+            'output': output_tokens,
+            'att_weight': att_weight,
+            'attention_scores': attention_scores,
+            'memory': self.memory
+        }
+
+
+class SpatialMemoryModule(nn.Module):
+    """
+    Spatial Memory Module - Spatial pattern processing with SSIM similarity
+    Input: (L, B, C) -> Output: (L, B, C)
+    Internal processing treats (B, C) as batch of spatial maps (H, W)
+    """
+    def __init__(self, mem_dim, height, width, **kwargs):
+        super(SpatialMemoryModule, self).__init__()
+        
+        self.mem_dim = mem_dim
+        self.height = height
+        self.width = width
+        self.spatial_dim = height * width
+        self.scale = 1.0
+        
+        # Memory shape: [mem_dim, H, W]
+        self.memory = nn.Parameter(torch.randn(mem_dim, height, width))
+        nn.init.normal_(self.memory, mean=0, std=0.1)
+        
+        # Projections work on flattened spatial vectors (H*W)
+        self.query_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
+        self.key_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
+        self.value_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
+
+    def compute_ssim_similarity(self, query_patterns, memory_patterns):
+        # query_patterns: [N_samples, H, W] (where N_samples = B*C)
+        # memory_patterns: [mem_dim, H, W]
+        N_patterns, H, W = query_patterns.shape
+        mem_dim = memory_patterns.shape[0]
+        
+        query_flat = query_patterns.view(N_patterns, H * W)
+        memory_flat = memory_patterns.view(mem_dim, H * W)
+        
+        query_mean = torch.mean(query_flat, dim=1, keepdim=True)
+        memory_mean = torch.mean(memory_flat, dim=1, keepdim=True)
+        
+        query_var = torch.var(query_flat, dim=1, keepdim=True)
+        memory_var = torch.var(memory_flat, dim=1, keepdim=True)
+        
+        query_centered = query_flat - query_mean
+        memory_centered = memory_flat - memory_mean
+        
+        covariance = torch.mm(query_centered, memory_centered.t()) / (H * W - 1)
+        
+        c1, c2 = 0.01, 0.03
+        mean_product = torch.mm(query_mean, memory_mean.t())
+        numerator = (2 * mean_product + c1) * (2 * covariance + c2)
+        
+        mean_sum = query_mean**2 + memory_mean.t()**2
+        var_sum = query_var + memory_var.t()
+        denominator = (mean_sum + c1) * (var_sum + c2)
+        
+        ssim = numerator / (denominator + 1e-8)
+        return ssim
+
+    def forward(self, input_tokens):
+        # input_tokens shape: [L, B, C] where L = H*W
+        L, batch_size, feature_dim = input_tokens.shape
+        H, W = self.height, self.width
+        
+        # --- FIX: Permute to process spatial maps properly ---
+        # We want to treat each Channel of each Batch as a spatial map (H, W).
+        # Target shape for projection: [B * C, H*W]
+        
+        # 1. Permute to [B, C, L]
+        input_permuted = input_tokens.permute(1, 2, 0).contiguous() 
+        
+        # 2. Reshape to [B * C, H*W] (Flatten spatial)
+        input_flat = input_permuted.view(batch_size * feature_dim, H * W)
+        
+        # 3. Project to Queries
+        queries_flat = self.query_proj(input_flat)
+        queries_spatial = queries_flat.view(batch_size * feature_dim, H, W)
+        
+        # 4. Prepare Memory Keys/Values
+        memory_flat = self.memory.view(self.mem_dim, H * W)
+        keys_flat = self.key_proj(memory_flat)
+        values_flat = self.value_proj(memory_flat)
+        keys_spatial = keys_flat.view(self.mem_dim, H, W)
+        
+        # 5. Compute SSIM
+        ssim_similarity = self.compute_ssim_similarity(queries_spatial, keys_spatial)
+        
+        if self.training:
+            mask_ratio = 0.6
+            num_masked = int(self.mem_dim * mask_ratio)
+            if num_masked > 0:
+                mask_indices = torch.randperm(self.mem_dim, device=ssim_similarity.device)[:num_masked]
+                ssim_similarity[:, mask_indices] = float('-inf')
+
+        attention_scores = ssim_similarity * self.scale
+        att_weight = F.softmax(attention_scores, dim=1)
+        
+        # 6. Retrieve Values: [B*C, mem_dim] x [mem_dim, H*W] -> [B*C, H*W]
+        output_flat = torch.mm(att_weight, values_flat)
+        
+        # 7. Reshape and Permute back to [L, B, C]
+        # [B*C, H*W] -> [B, C, L]
+        output_reshaped = output_flat.view(batch_size, feature_dim, L)
+        
+        # [B, C, L] -> [L, B, C]
+        output_tokens = output_reshaped.permute(2, 0, 1).contiguous()
+        
+        return {
+            'output': output_tokens,
+            'att_weight': att_weight,
+            'ssim_similarity': ssim_similarity,
+            'memory': self.memory
+        }
+
+# ==========================================
 # 1. MFCN (Neck)
 # ==========================================
 class MFCN(nn.Module):
@@ -43,7 +211,7 @@ class MFCN(nn.Module):
         return feature_align
 
 # ==========================================
-# 2. Baseline
+# 2. Baseline (Integrated with Dual Memory)
 # ==========================================
 class Baseline(nn.Module):
     def __init__(
@@ -72,6 +240,64 @@ class Baseline(nn.Module):
         self.input_channel_dim = inplanes[0]
         self.hidden_dim = hidden_dim
         self.input_proj = nn.Linear(inplanes[0], hidden_dim)
+        
+        # ================= Memory Configuration =================
+        self.memory_mode = kwargs.get('memory_mode', 'both')  # 'channel', 'spatial', 'both', 'none'
+        self.fusion_mode = kwargs.get('fusion_mode', 'concat')
+        self.channel_memory_size = kwargs.get('channel_memory_size', 256)
+        self.spatial_memory_size = kwargs.get('spatial_memory_size', 256)
+        
+        self.use_channel_memory = self.memory_mode in ['channel', 'both']
+        self.use_spatial_memory = self.memory_mode in ['spatial', 'both']
+        
+        self.channel_memory_module = None
+        self.spatial_memory_module = None
+        
+        if self.use_channel_memory:
+            self.channel_memory_module = ChannelMemoryModule(
+                mem_dim=self.channel_memory_size,
+                feature_dim=hidden_dim,
+                **kwargs
+            )
+            print('-> Baseline: Initialized Channel Memory')
+            
+        if self.use_spatial_memory:
+            self.spatial_memory_module = SpatialMemoryModule(
+                mem_dim=self.spatial_memory_size,
+                height=feature_size[0],
+                width=feature_size[1],
+                **kwargs
+            )
+            print('-> Baseline: Initialized Spatial Memory')
+        
+        # ================= Fusion Layer =================
+        fusion_input_dim = hidden_dim
+        self.gate_layer = None
+        self.alpha = None
+        
+        if self.use_channel_memory and self.use_spatial_memory:
+            if self.fusion_mode == 'concat':
+                fusion_input_dim = hidden_dim * 2
+                self.fusion_layer = nn.Linear(fusion_input_dim, hidden_dim)
+            elif self.fusion_mode in ['add', 'multiply']:
+                self.fusion_layer = nn.Identity()
+            elif self.fusion_mode == 'add_linear':
+                self.fusion_layer = nn.Linear(hidden_dim, hidden_dim)
+            elif self.fusion_mode == 'weighted_sum':
+                self.alpha = nn.Parameter(torch.tensor(0.5))
+                self.fusion_layer = nn.Identity()
+            elif self.fusion_mode == 'gate':
+                self.gate_layer = nn.Sequential(
+                    nn.Linear(hidden_dim * 2, hidden_dim),
+                    nn.Sigmoid()
+                )
+                self.fusion_layer = nn.Identity()
+            else:
+                 self.fusion_layer = nn.Identity() # fallback
+        else:
+             self.fusion_layer = nn.Identity()
+        # ==============================================================
+        
         encoder_layer = TransformerEncoderLayer(
             hidden_dim, 
             kwargs.get('nhead', 8), 
@@ -95,10 +321,10 @@ class Baseline(nn.Module):
         self.decoder = TransformerDecoder(decoder_layer, kwargs.get('num_decoder_layers', 4), decoder_norm, return_intermediate=False)
         
         self.output_proj = nn.Linear(hidden_dim, inplanes[0])
+        # Stats & K-Values
         self.stats_config = stats_config
         self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
         
-        # Xử lý K values
         global k_list 
         k_list = stats_config.get('k_values_272', None) if stats_config else None
         
@@ -136,35 +362,77 @@ class Baseline(nn.Module):
         
         feature_tokens = self.input_proj(feature_tokens)
         
-        k_channel_values = self.channel_k_values.to(feature_align.device)
-        k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
-        k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
-        
         activation_fn = self._get_activation_fn_from_config(self.activation_type)
         feature_tokens = F.layer_norm(feature_tokens, feature_tokens.shape[-1:])
         
         pos_embed = self.pos_embed(feature_tokens)
         encoded_tokens = self.encoder(feature_tokens, pos=pos_embed)
-        decoded_tokens = self.decoder(encoded_tokens, encoded_tokens, pos=pos_embed)
+
+        # ================= Memory Retrieval & Fusion =================
+        memory_features_list = []
+        channel_result = None
+        spatial_result = None
+        
+        # 1. Retrieve Channel Memory
+        if self.use_channel_memory:
+            channel_result = self.channel_memory_module(encoded_tokens)
+            channel_retrieved = channel_result['output'] # [H*W, B, C]
+            memory_features_list.append(channel_retrieved)
+        
+        # 2. Retrieve Spatial Memory
+        if self.use_spatial_memory:
+            spatial_result = self.spatial_memory_module(encoded_tokens)
+            spatial_retrieved = spatial_result['output'] # [H*W, B, C] (Fixed)
+            memory_features_list.append(spatial_retrieved)
+        
+        # 3. Fusion
+        if len(memory_features_list) == 0:
+            memory_features = encoded_tokens
+        elif len(memory_features_list) == 1:
+            memory_features = memory_features_list[0]
+        else:
+            channel_features = memory_features_list[0]
+            spatial_features = memory_features_list[1]
+            
+            if self.fusion_mode == 'concat':
+                # Concat dim=-1 (Channels) -> [H*W, B, 2C]
+                combined_features = torch.cat([channel_features, spatial_features], dim=-1)
+                memory_features = self.fusion_layer(combined_features)
+            elif self.fusion_mode == 'add':
+                memory_features = channel_features + spatial_features
+            elif self.fusion_mode == 'multiply':
+                memory_features = channel_features * spatial_features
+            elif self.fusion_mode == 'add_linear':
+                added_features = channel_features + spatial_features
+                memory_features = self.fusion_layer(added_features)
+            elif self.fusion_mode == 'weighted_sum':
+                memory_features = self.alpha * channel_features + (1 - self.alpha) * spatial_features
+            elif self.fusion_mode == 'gate':
+                combined = torch.cat([channel_features, spatial_features], dim=-1)
+                gate = self.gate_layer(combined)
+                memory_features = gate * channel_features + (1 - gate) * spatial_features
+            else:
+                 # fallback
+                 combined_features = torch.cat([channel_features, spatial_features], dim=-1)
+                 memory_features = self.fusion_layer(combined_features)
+        # ==================================================================
+
+        # Decoder
+        decoded_tokens = self.decoder(memory_features, memory_features, pos=pos_embed)
         
         feature_rec_tokens = self.output_proj(decoded_tokens)
         is_stats_enabled = self.stats_config is not None and self.stats_config.get('enabled', False)
 
         if is_stats_enabled:
-            # Lấy K values
+            # Stats processing (Original logic)
             k_channel_values = self.channel_k_values.to(feature_align.device)
             k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
             k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
             
-            # Lấy hàm activation (Sigmoid)
-            activation_fn = self._get_activation_fn_from_config(self.activation_type)
-            
-            # Áp dụng K và Sigmoid cho Reconstruction
             feature_rec_tokens = activation_fn(feature_rec_tokens * k_token_aligned)
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
             
             feature_align = activation_fn(feature_align * k_spatial_aligned)
-            
         else:
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
             feature_align = feature_align
@@ -172,7 +440,6 @@ class Baseline(nn.Module):
         pred = torch.sqrt(torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True))
         pred = self.upsample(pred)
         
-        # Trả về output_dict như yêu cầu của class Baseline
         output_dict = {
             "feature_rec": feature_rec,
             "feature_align": feature_align,
@@ -381,6 +648,12 @@ class BaselineWrapper(nn.Module):
             outstrides=[16]
         )
         self.net_norm = nn.LayerNorm(model_decoder['outplanes'][0], elementwise_affine=False)
+        memory_kwargs = {
+            'memory_mode': model_decoder.get('memory_mode', 'both'),
+            'fusion_mode': model_decoder.get('fusion_mode', 'concat'),
+            'channel_memory_size': model_decoder.get('channel_memory_size', 256),
+            'spatial_memory_size': model_decoder.get('spatial_memory_size', 256),
+        }
         # Khởi tạo Baseline
         self.net_ad = Baseline(
             inplanes=model_decoder['outplanes'], 
@@ -399,7 +672,8 @@ class BaselineWrapper(nn.Module):
             dim_feedforward=1024, 
             dropout=0.1, 
             activation='relu',
-            normalize_before=False
+            normalize_before=False,
+            **memory_kwargs
         )
 
         self.frozen_layers = ['net_backbone']
@@ -438,7 +712,6 @@ class BaselineWrapper(nn.Module):
         
         output_dict = self.net_ad(feats_norm)
         
-        # Tách dict thành tuple để trả về cho Trainer
         feature_align = output_dict['feature_align']
         feature_rec = output_dict['feature_rec']
         pred = output_dict['pred']
