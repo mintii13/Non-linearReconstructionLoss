@@ -14,7 +14,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # Stats Config
         self.stats_config = dict(
-            ci_ratio=97,            
+            ci_ratio=99,            
             activation_type='sigmoid',
             enabled=True             
         )
@@ -131,7 +131,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.enabled = True
         self.wandb.project = "Ader_MVTec" 
         self.wandb.entity = None 
-        self.wandb.name = 'BaselineLnorm_SigmoidChannel97_500_lr0.0001_512_seede42'
+        self.wandb.name = 'Baseline_SigmoidChannel99_500_lr0.0001_512_seede42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"
