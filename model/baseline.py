@@ -702,13 +702,13 @@ class BaselineWrapper(nn.Module):
     def forward(self, imgs):
         feats_backbone = self.net_backbone(imgs)
         feats_merge = self.net_merge(feats_backbone)
-        # 1. Permute
-        feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
-        # 2. Norm
-        feats_norm = self.net_norm(feats_norm)
-        # 3. Permute back
-        feats_norm = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
-        feats_norm = feats_norm.detach()
+        # # 1. Permute
+        # feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
+        # # 2. Norm
+        # feats_norm = self.net_norm(feats_norm)
+        # # 3. Permute back
+        # feats_norm = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
+        feats_norm = feats_merge.detach()
         
         output_dict = self.net_ad(feats_norm)
         
