@@ -91,10 +91,10 @@ class UniADTrainer(BaseTrainer):
 				
 				feats_backbone = model_ref.net_backbone(self.imgs)
 				feats_merge = model_ref.net_merge(feats_backbone)
-				# feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
-				# feats_norm = model_ref.net_norm(feats_norm)   
-				# feats_norm = feats_norm.permute(0, 3, 1, 2)
-				all_features.append(feats_merge.detach().cpu())
+				feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
+				feats_norm = model_ref.net_norm(feats_norm)   
+				feats_norm = feats_norm.permute(0, 3, 1, 2)
+				all_features.append(feats_norm.detach().cpu())
 
 		# Gộp tất cả features: N x C x H x W
 		full_features = torch.cat(all_features, dim=0)
