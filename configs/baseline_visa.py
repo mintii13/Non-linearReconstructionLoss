@@ -42,7 +42,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # ==> Data
         self.data.type = 'DefaultAD'
-        self.data.root = 'data/mvtec'
+        self.data.root = 'data/visa'
         self.data.meta = 'meta.json'
         self.data.cls_names = []
 
@@ -129,9 +129,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # === WandB ===
         self.wandb = Namespace()
         self.wandb.enabled = True
-        self.wandb.project = "Ader_MVTec" 
+        self.wandb.project = "Ader_VisA" 
         self.wandb.entity = None 
-        self.wandb.name = 'BaselineLnormBefore_SigmoidChannel90_500_lr0.0001_512_seede42'
+        self.wandb.name = 'Baseline_SigmoidChannel90_500_lr0.0001_512_seede42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"
