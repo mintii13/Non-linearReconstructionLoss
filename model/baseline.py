@@ -141,7 +141,7 @@ class Baseline(nn.Module):
         k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
         
         activation_fn = self._get_activation_fn_from_config(self.activation_type)
-        feature_tokens = F.layer_norm(feature_tokens, feature_tokens.shape[-1:])
+        # feature_tokens = F.layer_norm(feature_tokens, feature_tokens.shape[-1:])
         
         pos_embed = self.pos_embed(feature_tokens)
         encoded_tokens = self.encoder(feature_tokens, pos=pos_embed)
