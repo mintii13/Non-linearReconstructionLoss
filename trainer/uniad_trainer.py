@@ -91,10 +91,10 @@ class UniADTrainer(BaseTrainer):
 				
 				feats_backbone = model_ref.net_backbone(self.imgs)
 				feats_merge = model_ref.net_merge(feats_backbone)
-				# feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
-				# feats_norm = model_ref.net_norm(feats_norm)   
-				# feats_norm = feats_norm.permute(0, 3, 1, 2)
-				all_features.append(feats_merge.detach().cpu())
+				feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
+				feats_norm = model_ref.net_norm(feats_norm)   
+				feats_norm = feats_norm.permute(0, 3, 1, 2)
+				all_features.append(feats_norm.detach().cpu())
 
 		# Gộp tất cả features: N x C x H x W
 		full_features = torch.cat(all_features, dim=0)
@@ -107,7 +107,7 @@ class UniADTrainer(BaseTrainer):
 		tail = (100 - ci_ratio) / 2.0
 		
 		# Chọn tử số dựa trên activation type
-		numerator = 8.0 if model_ref.activation_type == 'sigmoid' else 4.8
+		numerator = 8.0 if model_ref.activation_type == 'sigmoid' else 5.4
 		
 		k_list = []
 		for c in range(C):
