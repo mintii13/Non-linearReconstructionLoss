@@ -94,20 +94,10 @@ class Baseline(nn.Module):
         decoder_norm = nn.LayerNorm(hidden_dim)
         self.decoder = TransformerDecoder(decoder_layer, kwargs.get('num_decoder_layers', 4), decoder_norm, return_intermediate=False)
         
-        self.output_proj = nn.Linear(hidden_dim, inplanes[0])
+        self.output_proj = nn.Linear(hidden_dim, inplanes[0] * 2)
         self.stats_config = stats_config
         self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
         
-        # Xử lý K values
-        global k_list 
-        k_list = stats_config.get('k_values_272', None) if stats_config else None
-        
-        if k_list is None or len(k_list) != self.input_channel_dim:
-            k_tensor = torch.ones(self.input_channel_dim, dtype=torch.float32)
-        else:
-            k_tensor = torch.tensor(k_list, dtype=torch.float32)
-            
-        self.channel_k_values = nn.Parameter(k_tensor, requires_grad=False)
         self.upsample = nn.UpsamplingBilinear2d(scale_factor=instrides[0])
 
         initialize_from_cfg(self, initializer)
@@ -135,47 +125,34 @@ class Baseline(nn.Module):
             feature_tokens = self.add_jitter(feature_tokens, self.feature_jitter.scale, self.feature_jitter.prob)
         
         feature_tokens = self.input_proj(feature_tokens)
-        
-        k_channel_values = self.channel_k_values.to(feature_align.device)
-        k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
-        k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
-        
-        activation_fn = self._get_activation_fn_from_config(self.activation_type)
         feature_tokens = F.layer_norm(feature_tokens, feature_tokens.shape[-1:])
         
         pos_embed = self.pos_embed(feature_tokens)
         encoded_tokens = self.encoder(feature_tokens, pos=pos_embed)
         decoded_tokens = self.decoder(encoded_tokens, encoded_tokens, pos=pos_embed)
         
+        # 1. Lấy output từ Linear Layer (size 2C
         feature_rec_tokens = self.output_proj(decoded_tokens)
-        is_stats_enabled = self.stats_config is not None and self.stats_config.get('enabled', False)
-
-        if is_stats_enabled:
-            # Lấy K values
-            k_channel_values = self.channel_k_values.to(feature_align.device)
-            k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
-            k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
-            
-            # Lấy hàm activation (Sigmoid)
-            activation_fn = self._get_activation_fn_from_config(self.activation_type)
-            
-            # Áp dụng K và Sigmoid cho Reconstruction
-            feature_rec_tokens = activation_fn(feature_rec_tokens * k_token_aligned)
-            feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
-            
-            feature_align = activation_fn(feature_align * k_spatial_aligned)
-            
-        else:
-            feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
-            feature_align = feature_align
+        # 2. Tách đôi output: Một nửa là Mean (mu), Một nửa là Log Variance (s)
+        mu_tokens, log_var_tokens = torch.chunk(feature_rec_tokens, 2, dim=-1)
+        # 3. Rearrange lại về dạng ảnh (B, C, H, W)
+        # mu chính là feature_rec (feature tái tạo)
+        feature_rec = rearrange(mu_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
+        log_var = rearrange(log_var_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
+        # 4. Tính Anomaly Map (Pred)
+        # Công thức: Lỗi bình phương / Phương sai
+        # Ý nghĩa: Lỗi lớn mà Model tự tin (phương sai thấp) -> Anomaly cao.
+        #         Lỗi lớn mà Model không chắc (phương sai cao/noise) -> Anomaly thấp.
+        pixel_loss = (feature_rec - feature_align) ** 2
+        inv_var = torch.exp(-log_var) # 1 / sigma^2
         
-        pred = torch.sqrt(torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True))
+        pred = torch.sqrt(torch.sum(pixel_loss * inv_var, dim=1, keepdim=True))
         pred = self.upsample(pred)
         
-        # Trả về output_dict như yêu cầu của class Baseline
         output_dict = {
             "feature_rec": feature_rec,
             "feature_align": feature_align,
+            "log_var": log_var,   # <--- Cần trả về cái này để tính Loss
             "pred": pred,
         }
         return output_dict
@@ -442,8 +419,8 @@ class BaselineWrapper(nn.Module):
         feature_align = output_dict['feature_align']
         feature_rec = output_dict['feature_rec']
         pred = output_dict['pred']
-        
-        return feature_align, feature_rec, pred
+        log_var = output_dict['log_var']
+        return feature_align, feature_rec, log_var, pred
 
 # ==========================================
 # 5. Register Module

@@ -59,78 +59,14 @@ class UniADTrainer(BaseTrainer):
 			)
 		else:
 			self.wandb_run = None
-
-	def calculate_k_values(self):
-		if not self.master:
-			return
-
-		# Kiểm tra xem có bật tính năng này trong config model không
-		if not hasattr(self.net, 'module'):
-			model_ref = self.net
-		else:
-			model_ref = self.net.module
-			
-		if not hasattr(model_ref, 'stats_config') or not model_ref.stats_config.get('enabled', False):
-			return
-
-		log_msg(self.logger, f"Started calculating K-Channel stats (CI Ratio: {model_ref.stats_config['ci_ratio']})...")
-		
-		self.net.eval()
-		train_loader = iter(self.train_loader)
-		all_features = []
-		
-		# Duyệt qua toàn bộ tập train
-		with torch.no_grad():
-			for i in tqdm(range(len(self.train_loader)), desc="Calculating K"):
-				try:
-					data = next(train_loader)
-				except StopIteration:
-					break
-				
-				self.set_input(data)
-				
-				feats_backbone = model_ref.net_backbone(self.imgs)
-				feats_merge = model_ref.net_merge(feats_backbone)
-				# feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
-				# feats_norm = model_ref.net_norm(feats_norm)   
-				# feats_norm = feats_norm.permute(0, 3, 1, 2)
-				all_features.append(feats_merge.detach().cpu())
-
-		# Gộp tất cả features: N x C x H x W
-		full_features = torch.cat(all_features, dim=0)
-		N, C, H, W = full_features.shape
-		
-		# Chuyển về dạng (C, N*H*W) để tính thống kê
-		feature_np = full_features.permute(1, 0, 2, 3).reshape(C, -1).numpy()
-		
-		ci_ratio = model_ref.stats_config['ci_ratio']
-		tail = (100 - ci_ratio) / 2.0
-		
-		# Chọn tử số dựa trên activation type
-		numerator = 8.0 if model_ref.activation_type == 'sigmoid' else 5.4
-		
-		k_list = []
-		for c in range(C):
-			channel_data = feature_np[c]
-			lower = np.percentile(channel_data, tail)
-			upper = np.percentile(channel_data, 100 - tail)
-			r = upper - lower
-			
-			if r > 1e-6:
-				k = numerator / r
-			else:
-				k = 1.0
-			k_list.append(k)
-			
-		# Update buffer của model
-		k_tensor = torch.tensor(k_list, dtype=torch.float32).cuda()
-		model_ref.k_values.copy_(k_tensor)
-		print("\n")
-		log_msg(self.logger, f"K-Values calculated. Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}")
-		print(f"K-Values calculated.** Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}", flush=True)
-		# Giải phóng bộ nhớ
-		del all_features, full_features, feature_np
-		torch.cuda.empty_cache()
+	def gaussian_nll_loss(self, target, mu, log_var):
+		"""
+		Calculates Gaussian Negative Log Likelihood Loss.
+		Loss = 0.5 * ( exp(-s) * (x - mu)^2 + s )
+		"""
+		pixel_loss = (target - mu) ** 2
+		loss = 0.5 * (torch.exp(-log_var) * pixel_loss + log_var)
+		return loss.mean()
 
 	def reset(self, isTrain=True):
 		self.net.train(mode=isTrain)
@@ -149,7 +85,7 @@ class UniADTrainer(BaseTrainer):
 		self.bs = self.imgs.shape[0]
 	
 	def forward(self):
-		self.feats_t, self.feats_s, self.pred = self.net(self.imgs)
+		self.feats_t, self.feats_s, self.log_var, self.pred = self.net(self.imgs)
 
 	def backward_term(self, loss_term, optim):
 		optim.zero_grad()
@@ -166,9 +102,9 @@ class UniADTrainer(BaseTrainer):
 			self.imgs, _ = self.mixup_fn(self.imgs, torch.ones(self.imgs.shape[0], device=self.imgs.device))
 		with self.amp_autocast():
 			self.forward()
-			loss_mse = self.loss_terms['pixel'](self.feats_t, self.feats_s)
-		self.backward_term(loss_mse, self.optim)
-		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
+			loss_nll = self.gaussian_nll_loss(self.feats_t, self.feats_s, self.log_var)
+		self.backward_term(loss_nll, self.optim)
+		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_nll, self.world_size).clone().detach().item(), 1, self.master)
 	
 	def _finish(self):
 		log_msg(self.logger, 'finish training')
@@ -195,17 +131,7 @@ class UniADTrainer(BaseTrainer):
 	def train(self):
 		self.reset(isTrain=True)
 		self.train_loader.sampler.set_epoch(int(self.epoch)) if self.cfg.dist else None
-		if self.epoch == 0 and self.iter == 0:
-			self.calculate_k_values()
-			
-			# Broadcast K values cho các GPU khác nếu dùng DDP
-			if self.cfg.dist:
-				if hasattr(self.net, 'module'):
-					torch.distributed.broadcast(self.net.module.k_values, src=0)
-				else:
-					torch.distributed.broadcast(self.net.k_values, src=0)
-			
-			self.net.train()
+		self.net.train()
 		train_length = self.cfg.data.train_size
 		train_loader = iter(self.train_loader)
 		while self.epoch < self.epoch_full and self.iter < self.iter_full:
