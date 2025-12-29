@@ -104,28 +104,58 @@ class UniAD_decoder(nn.Module):
 		self.upsample = nn.UpsamplingBilinear2d(scale_factor=instrides[0])
 
 		initialize_from_cfg(self, initializer)
+	
+	def generate_perlin_like_mask(self, B, H, W, device):
+		# Tạo mask rỗng
+		perlin_mask = torch.zeros((B, 1, H, W), device=device)
+		
+		# Tạo nhiễu từ 2 tần số khác nhau để giả lập Perlin (Low & High freq)
+		for freq in [2, 4]: 
+			# Tạo nhiễu ngẫu nhiên ở độ phân giải thấp
+			noise = torch.randn(B, 1, H // freq, W // freq, device=device)
+			# Upsample mượt (Bilinear) lên kích thước gốc
+			noise = F.interpolate(noise, size=(H, W), mode='bilinear', align_corners=False)
+			perlin_mask += noise
 
-	def add_jitter(self, feature_tokens, scale, prob):
+		# Nhị phân hóa mask (tạo các vùng blobs)
+		# Ngưỡng > 0.5 sẽ giữ lại khoảng 30% diện tích làm nhiễu
+		mask = torch.where(perlin_mask > 0.5, 1.0, 0.0)
+		return mask
+
+	def add_jitter(self, features, scale, prob):
+		# features shape: B x C x H x W
 		if random.uniform(0, 1) <= prob:
-			num_tokens, batch_size, dim_channel = feature_tokens.shape
-			feature_norms = (
-				feature_tokens.norm(dim=2).unsqueeze(2) / dim_channel
-			)  # (H x W) x B x 1
-			jitter = torch.randn((num_tokens, batch_size, dim_channel)).cuda()
-			jitter = jitter * feature_norms * scale
-			feature_tokens = feature_tokens + jitter
-		return feature_tokens
+			B, C, H, W = features.shape
+			
+			# 1. Tạo Mask cấu trúc (Perlin-like Mask)
+			mask = self.generate_perlin_like_mask(B, H, W, features.device) # B x 1 x H x W
+			
+			# 2. Tạo Nhiễu (Gaussian Noise được scale theo độ lớn feature)
+			# Tính norm theo chiều C để scale nhiễu phù hợp với feature
+			feature_norms = torch.norm(features, p=2, dim=1, keepdim=True) / C
+			noise = torch.randn_like(features) * feature_norms * scale
+			
+			# 3. Trộn nhiễu vào ảnh gốc dựa trên Mask
+			# Vùng Mask=0: Giữ nguyên Feature gốc
+			# Vùng Mask=1: Feature gốc + Noise
+			features = (1 - mask) * features + mask * (features + noise)
+			
+		return features
 
 	def forward(self, input):
 		# feature_align = input["feature_align"]  # B x C X H x W
 		feature_align = input
+		if self.training and self.feature_jitter:
+			feature_align = self.add_jitter(
+				feature_align, self.feature_jitter.scale, self.feature_jitter.prob
+			)
 		feature_tokens = rearrange(
 			feature_align, "b c h w -> (h w) b c"
 		)  # (H x W) x B x C
-		if self.training and self.feature_jitter:
-			feature_tokens = self.add_jitter(
-				feature_tokens, self.feature_jitter.scale, self.feature_jitter.prob
-			)
+		# if self.training and self.feature_jitter:
+		# 	feature_tokens = self.add_jitter(
+		# 		feature_tokens, self.feature_jitter.scale, self.feature_jitter.prob
+		# 	)
 		feature_tokens = self.input_proj(feature_tokens)  # (H x W) x B x C
 		# feature_tokens = F.layer_norm(feature_tokens, feature_tokens.shape[-1:]) # for stat
 		# k = 0.337
