@@ -34,10 +34,51 @@ from util.vis import vis_rgb_gt_amp
 import wandb
 import setproctitle
 setproctitle.setproctitle("Minh Tri is training...")
+import torch.nn as nn
+class FocalFrequencyLoss(nn.Module):
+	"""
+	Tính loss giữa hai feature map trên miền tần số.
+	"""
+	def __init__(self, loss_weight=1.0, alpha=1.0):
+		super(FocalFrequencyLoss, self).__init__()
+		self.loss_weight = loss_weight
+		self.alpha = alpha
+
+	def forward(self, pred, target):
+		# pred, target: (B, C, H, W)
+		
+		# 1. Chuyển sang miền tần số (FFT 2D)
+		pred_fft = torch.fft.fft2(pred, dim=(-2, -1))
+		target_fft = torch.fft.fft2(target, dim=(-2, -1))
+		
+		# 2. Stack phần thực và ảo: shape (B, C, H, W, 2)
+		pred_fft = torch.stack([pred_fft.real, pred_fft.imag], -1)
+		target_fft = torch.stack([target_fft.real, target_fft.imag], -1)
+		
+		# 3. Tính Amplitude: shape (B, C, H, W)
+		pred_amp = torch.sqrt(pred_fft[..., 0]**2 + pred_fft[..., 1]**2 + 1e-8)
+		target_amp = torch.sqrt(target_fft[..., 0]**2 + target_fft[..., 1]**2 + 1e-8)
+		
+		# 4. Focal Weight: shape (B, C, H, W)
+		diff = torch.abs(pred_amp - target_amp)
+		spectrum_weight = diff ** self.alpha
+		
+		# --- FIX LỖI Ở ĐÂY ---
+		# Thêm unsqueeze(-1) để biến shape thành (B, C, H, W, 1)
+		# Giúp broadcast khớp với (B, C, H, W, 2)
+		spectrum_weight = spectrum_weight.unsqueeze(-1)
+		# ---------------------
+
+		# 5. Tính Loss
+		loss = spectrum_weight * (pred_fft - target_fft)**2
+		
+		return torch.mean(loss) * self.loss_weight
+
 @TRAINER.register_module
 class UniADTrainer(BaseTrainer):
 	def __init__(self, cfg):
 		super(UniADTrainer, self).__init__(cfg)
+		self.fft_loss_fn = FocalFrequencyLoss(loss_weight=0.1, alpha=1.0)
 		if self.master and hasattr(self.cfg, 'wandb') and self.cfg.wandb.enabled:
 			wandb_cfg = self.cfg.wandb
 		
@@ -167,9 +208,12 @@ class UniADTrainer(BaseTrainer):
 		with self.amp_autocast():
 			self.forward()
 			loss_mse = self.loss_terms['pixel'](self.feats_t, self.feats_s)
-		self.backward_term(loss_mse, self.optim)
+			loss_fft = self.fft_loss_fn(self.feats_t, self.feats_s)
+			loss_total = loss_mse + loss_fft
+		self.backward_term(loss_total, self.optim)
 		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
-	
+		if self.log_terms.get('fft'):
+			update_log_term(self.log_terms.get('fft'), reduce_tensor(loss_fft, self.world_size).clone().detach().item(), 1, self.master)
 	def _finish(self):
 		log_msg(self.logger, 'finish training')
 		self.writer.close() if self.master else None

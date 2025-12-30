@@ -16,7 +16,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 		self.stats_config = dict(
             ci_ratio=90,             # Tỷ lệ khoảng tin cậy (Confidence Interval)
             activation_type='sigmoid', # Loại hàm kích hoạt
-            enabled=True
+            enabled=False
         )
 		self.seed = 42
 		self.size = 256
@@ -126,7 +126,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 		self.wandb.enabled = True
 		self.wandb.project = "Ader_MVTec"
 		self.wandb.entity = None 
-		self.wandb.name = 'UniAD_SigmoidChannel90_600_512_seede42'
+		self.wandb.name = 'UniAD_mse+0.1fft_500_512_seede42'
 		self.wandb.tags = ["mvtec", "anomaly-detection"]
 		self.wandb.notes = "UniAD training on MVTec-AD dataset with 600 epochs and validation every 100 epochs."
 		self.wandb.mode = "online"
