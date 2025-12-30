@@ -126,7 +126,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 		self.wandb.enabled = True
 		self.wandb.project = "Ader_Perlin_MVTec"
 		self.wandb.entity = None 
-		self.wandb.name = 'UniAD_Perlin_500_512_seede42'
+		self.wandb.name = 'UniAD_Perlin_freq4,8_featuremix_500_512_seede42'
 		self.wandb.tags = ["mvtec", "anomaly-detection"]
 		self.wandb.notes = "UniAD training on MVTec-AD dataset with 600 epochs and validation every 100 epochs."
 		self.wandb.mode = "online"

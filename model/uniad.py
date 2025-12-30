@@ -110,7 +110,7 @@ class UniAD_decoder(nn.Module):
 		perlin_mask = torch.zeros((B, 1, H, W), device=device)
 		
 		# Tạo nhiễu từ 2 tần số khác nhau để giả lập Perlin (Low & High freq)
-		for freq in [2, 4]: 
+		for freq in [4, 8]: 
 			# Tạo nhiễu ngẫu nhiên ở độ phân giải thấp
 			noise = torch.randn(B, 1, H // freq, W // freq, device=device)
 			# Upsample mượt (Bilinear) lên kích thước gốc
@@ -123,23 +123,31 @@ class UniAD_decoder(nn.Module):
 		return mask
 
 	def add_jitter(self, features, scale, prob):
-		# features shape: B x C x H x W
-		if random.uniform(0, 1) <= prob:
+		"""
+		Feature Mixup Jittering: Thay thế vùng bị mask bằng feature của ảnh khác trong batch.
+		Giúp model học Semantic Inpainting thay vì khử nhiễu đơn thuần.
+		"""
+		# Chỉ chạy khi training và thỏa mãn xác suất prob
+		if self.training and random.uniform(0, 1) <= prob:
 			B, C, H, W = features.shape
 			
 			# 1. Tạo Mask cấu trúc (Perlin-like Mask)
+			# Hàm generate_perlin_like_mask của bạn đã dùng freq [4, 8] là rất tốt cho map 14x14
 			mask = self.generate_perlin_like_mask(B, H, W, features.device) # B x 1 x H x W
 			
-			# 2. Tạo Nhiễu (Gaussian Noise được scale theo độ lớn feature)
-			# Tính norm theo chiều C để scale nhiễu phù hợp với feature
-			feature_norms = torch.norm(features, p=2, dim=1, keepdim=True) / C
-			noise = torch.randn_like(features) * feature_norms * scale
+			# 2. Tạo nguồn nhiễu từ chính các ảnh khác trong Batch (Feature Mixup)
+			# Tráo đổi ngẫu nhiên vị trí các ảnh trong batch để lấy feature "hàng xóm"
+			perm = torch.randperm(B, device=features.device)
+			source_features = features[perm]
 			
-			# 3. Trộn nhiễu vào ảnh gốc dựa trên Mask
-			# Vùng Mask=0: Giữ nguyên Feature gốc
-			# Vùng Mask=1: Feature gốc + Noise
-			features = (1 - mask) * features + mask * (features + noise)
+			# 3. Trộn (Mixup):
+			# Vùng Mask=0 (Giữ nguyên): Lấy feature gốc
+			# Vùng Mask=1 (Nhiễu): Lấy feature của ảnh hàng xóm
+			features = features * (1 - mask) + source_features * mask
 			
+			# Lưu ý: Tham số 'scale' lúc này không còn tác dụng (vì không cộng noise),
+			# nhưng giữ lại trong danh sách tham số để không phải sửa code gọi hàm.
+
 		return features
 
 	def forward(self, input):
@@ -791,7 +799,7 @@ class UniAD(nn.Module):
 		self.net_backbone = get_model(model_backbone)
 		self.net_merge = MFCN(inplanes=model_decoder['inplanes'], outplanes=model_decoder['outplanes'], instrides=[2, 4, 8, 16], outstrides=[16])
 		self.net_ad = UniAD_decoder(inplanes=model_decoder['outplanes'], instrides=model_decoder['instrides'], feature_size=model_decoder['feature_size'],
-							feature_jitter=Namespace(**{'scale': 20.0, 'prob': 1.0}),
+							feature_jitter=Namespace(**{'scale': 0.0, 'prob': 0.5}),
 							neighbor_mask=Namespace(**{'neighbor_size': model_decoder['neighbor_size'], 'mask': [True, True, True]}),
 							hidden_dim=512, pos_embed_type='learned', save_recon=Namespace(**{'save_dir': 'result_recon'}),
 							initializer={'method': 'xavier_uniform'}, nhead=8, num_encoder_layers=4,
