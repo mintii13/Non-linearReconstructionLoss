@@ -110,7 +110,7 @@ class UniAD_decoder(nn.Module):
 		perlin_mask = torch.zeros((B, 1, H, W), device=device)
 		
 		# Tạo nhiễu từ 2 tần số khác nhau để giả lập Perlin (Low & High freq)
-		for freq in [4, 8]: 
+		for freq in [4, 8, 16]: 
 			# Tạo nhiễu ngẫu nhiên ở độ phân giải thấp
 			noise = torch.randn(B, 1, H // freq, W // freq, device=device)
 			# Upsample mượt (Bilinear) lên kích thước gốc
@@ -124,30 +124,28 @@ class UniAD_decoder(nn.Module):
 
 	def add_jitter(self, features, scale, prob):
 		"""
-		Feature Mixup Jittering: Thay thế vùng bị mask bằng feature của ảnh khác trong batch.
-		Giúp model học Semantic Inpainting thay vì khử nhiễu đơn thuần.
+		Self-Mixup Jittering: Dùng chính feature của ảnh đó nhưng dịch chuyển (roll)
+		để tạo ra sự sai lệch cấu trúc (misalignment) tại vùng Perlin Mask.
 		"""
-		# Chỉ chạy khi training và thỏa mãn xác suất prob
 		if self.training and random.uniform(0, 1) <= prob:
 			B, C, H, W = features.shape
 			
 			# 1. Tạo Mask cấu trúc (Perlin-like Mask)
-			# Hàm generate_perlin_like_mask của bạn đã dùng freq [4, 8] là rất tốt cho map 14x14
-			mask = self.generate_perlin_like_mask(B, H, W, features.device) # B x 1 x H x W
+			mask = self.generate_perlin_like_mask(B, H, W, features.device)
 			
-			# 2. Tạo nguồn nhiễu từ chính các ảnh khác trong Batch (Feature Mixup)
-			# Tráo đổi ngẫu nhiên vị trí các ảnh trong batch để lấy feature "hàng xóm"
-			perm = torch.randperm(B, device=features.device)
-			source_features = features[perm]
+			# 2. Tạo nguồn nhiễu từ CHÍNH ẢNH ĐÓ (Self-Mixup)
+			# Dịch chuyển feature map theo chiều H và W một đoạn ngẫu nhiên
+			# Roll ngẫu nhiên từ 1 đến H//2 để đảm bảo sự sai lệch đủ lớn
+			shift_h = torch.randint(1, H // 2, (1,)).item()
+			shift_w = torch.randint(1, W // 2, (1,)).item()
 			
-			# 3. Trộn (Mixup):
-			# Vùng Mask=0 (Giữ nguyên): Lấy feature gốc
-			# Vùng Mask=1 (Nhiễu): Lấy feature của ảnh hàng xóm
+			# Thực hiện roll (dịch vòng quanh)
+			source_features = torch.roll(features, shifts=(shift_h, shift_w), dims=(2, 3))
+			
+			# 3. Trộn (Mixup)
+			# Vùng Mask=1 sẽ bị thay thế bởi feature bị dịch chuyển
 			features = features * (1 - mask) + source_features * mask
 			
-			# Lưu ý: Tham số 'scale' lúc này không còn tác dụng (vì không cộng noise),
-			# nhưng giữ lại trong danh sách tham số để không phải sửa code gọi hàm.
-
 		return features
 
 	def forward(self, input):
