@@ -21,7 +21,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 		self.seed = 42
 		self.size = 256
 		# === 1. ĐIỀU CHỈNH EPOCH VÀ VALIDATE ===
-		self.epoch_full = 600 # Tổng số epoch
+		self.epoch_full = 500 # Tổng số epoch
 		self.warmup_epochs = 0
 		self.test_per_epoch = 50 # Validate mỗi 100 epoch
 		self.test_start_epoch = 50 # Bắt đầu validate từ epoch 1
@@ -126,7 +126,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 		self.wandb.enabled = True
 		self.wandb.project = "Ader_MVTec"
 		self.wandb.entity = None 
-		self.wandb.name = 'UniAD_mse+0.1fft_500_512_seede42'
+		self.wandb.name = 'UniAD_mse+0.1logfft_warmup100_500_512_seede42'
 		self.wandb.tags = ["mvtec", "anomaly-detection"]
 		self.wandb.notes = "UniAD training on MVTec-AD dataset with 600 epochs and validation every 100 epochs."
 		self.wandb.mode = "online"
