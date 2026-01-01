@@ -63,50 +63,66 @@ class UniADTrainer(BaseTrainer):
 	def calculate_loss_weights(self):
 		if not self.master: return
 
-		# Tham chiếu đến model (xử lý trường hợp DDP)
 		if hasattr(self.net, 'module'): model_ref = self.net.module
 		else: model_ref = self.net
 			
-		log_msg(self.logger, "Calculating Channel-wise Weights (Inverse Variance)...")
+		log_msg(self.logger, "Calculating Robust Channel Weights...")
 		self.net.eval()
 		train_loader = iter(self.train_loader)
 		all_features = []
 		
-		# 1. Thu thập feature mẫu từ tập train (khoảng 50 batch là đủ)
 		with torch.no_grad():
 			for i in tqdm(range(len(self.train_loader)), desc="Stat Weights"):
 				try: data = next(train_loader)
 				except StopIteration: break
-				
 				self.set_input(data)
-				# Forward qua backbone + merge để lấy feature gốc
 				feats = model_ref.net_backbone(self.imgs)
 				feats = model_ref.net_merge(feats)
 				all_features.append(feats.detach().cpu())
-				
-		# 2. Tính Std/Variance cho từng channel
-		full_features = torch.cat(all_features, dim=0) # (N, C, H, W)
+				if i >= 50: break 
+
+		full_features = torch.cat(all_features, dim=0)
 		C = full_features.shape[1]
 		
-		# Flatten để tính std trên toàn bộ pixel của channel
+		# Tính STD
 		flat_features = full_features.permute(1, 0, 2, 3).reshape(C, -1)
-		std_values = torch.std(flat_features, dim=1) # Shape (C,)
+		std_values = torch.std(flat_features, dim=1) 
 		
-		# 3. Tính Weight: Nghịch đảo của Std (Feature ổn định -> Weight cao)
-		# Cộng 1e-6 để tránh chia cho 0
-		weights = 1.0 / (std_values + 1e-6)
+		# === [LOG MỚI] In thông tin Raw STD ===
+		log_msg(self.logger, f"\n[Statistics] Channel STD (Raw):")
+		log_msg(self.logger, f"   >> Min : {std_values.min():.4f}")
+		log_msg(self.logger, f"   >> Max : {std_values.max():.4f}")
+		log_msg(self.logger, f"   >> Mean: {std_values.mean():.4f}")
+		# ======================================
+
+		# === LOGIC TÍNH WEIGHT ===
+		# 1. Softening: Dùng sqrt để giảm độ gắt
+		soft_std = torch.sqrt(std_values)
 		
-		# Normalize để trung bình weight = 1 (giữ scale loss ổn định)
+		# 2. Ngăn chia cho số 0 hoặc số quá nhỏ (Dead channels)
+		soft_std = torch.clamp(soft_std, min=0.01)
+		
+		# 3. Tính weight nghịch đảo
+		weights = 1.0 / soft_std
+		
+		# 4. Normalize về mean = 1
 		weights = weights / weights.mean()
 		
-		# 4. Lưu vào buffer của model
+		# 5. Hard Clipping: Giới hạn weight
+		weights = torch.clamp(weights, min=0.5, max=5.0)
+		# =========================
+		
 		device = next(model_ref.parameters()).device 
 		weights = weights.to(device)
 		model_ref.loss_weights.copy_(weights)
 		
-		log_msg(self.logger, f"Weights Calculated. Min: {weights.min():.4f}, Max: {weights.max():.4f}")
+		# === [LOG MỚI] In thông tin Final Weights ===
+		log_msg(self.logger, f"[Statistics] Final Loss Weights (After Norm & Clip):")
+		log_msg(self.logger, f"   >> Min : {weights.min():.4f}")
+		log_msg(self.logger, f"   >> Max : {weights.max():.4f}")
+		log_msg(self.logger, f"   >> Mean: {weights.mean():.4f}\n")
+		# ============================================
 		
-		# Dọn dẹp
 		del all_features, full_features
 		torch.cuda.empty_cache()
 
