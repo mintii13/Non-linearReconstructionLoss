@@ -780,7 +780,7 @@ class UniAD(nn.Module):
 			self.activation_type = 'sigmoid'
 		out_channels = model_decoder['outplanes'][0]
 		self.register_buffer('k_values', torch.ones(out_channels, dtype=torch.float32))
-
+		self.net_norm = nn.LayerNorm(model_decoder['outplanes'][0], elementwise_affine=False)
 	def _get_activation(self):
 		if self.activation_type == 'sigmoid':
 			return torch.sigmoid
@@ -805,7 +805,13 @@ class UniAD(nn.Module):
 	def forward(self, imgs):
 		feats_backbone = self.net_backbone(imgs)
 		feats_merge = self.net_merge(feats_backbone)
-		feats_merge = feats_merge.detach()
+		# 1. Permute
+		feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
+		# 2. Norm
+		feats_norm = self.net_norm(feats_norm)
+		# 3. Permute back
+		feats_norm = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
+		feats_merge = feats_norm.detach()
 		feature_align, feature_rec, _ = self.net_ad(feats_merge)
 		if self.stats_config and self.stats_config.get('enabled', False):
 			# Reshape K để broadcast: (1, C, 1, 1)
