@@ -60,76 +60,54 @@ class UniADTrainer(BaseTrainer):
 		else:
 			self.wandb_run = None
 
-	def calculate_k_values(self):
-		if not self.master:
-			return
+	def calculate_loss_weights(self):
+		if not self.master: return
 
-		# Kiểm tra xem có bật tính năng này trong config model không
-		if not hasattr(self.net, 'module'):
-			model_ref = self.net
-		else:
-			model_ref = self.net.module
+		# Tham chiếu đến model (xử lý trường hợp DDP)
+		if hasattr(self.net, 'module'): model_ref = self.net.module
+		else: model_ref = self.net
 			
-		if not hasattr(model_ref, 'stats_config') or not model_ref.stats_config.get('enabled', False):
-			return
-
-		log_msg(self.logger, f"Started calculating K-Channel stats (CI Ratio: {model_ref.stats_config['ci_ratio']})...")
-		
+		log_msg(self.logger, "Calculating Channel-wise Weights (Inverse Variance)...")
 		self.net.eval()
 		train_loader = iter(self.train_loader)
 		all_features = []
 		
-		# Duyệt qua toàn bộ tập train
+		# 1. Thu thập feature mẫu từ tập train (khoảng 50 batch là đủ)
 		with torch.no_grad():
-			for i in tqdm(range(len(self.train_loader)), desc="Calculating K"):
-				try:
-					data = next(train_loader)
-				except StopIteration:
-					break
+			for i in tqdm(range(len(self.train_loader)), desc="Stat Weights"):
+				try: data = next(train_loader)
+				except StopIteration: break
 				
 				self.set_input(data)
+				# Forward qua backbone + merge để lấy feature gốc
+				feats = model_ref.net_backbone(self.imgs)
+				feats = model_ref.net_merge(feats)
+				all_features.append(feats.detach().cpu())
 				
-				feats_backbone = model_ref.net_backbone(self.imgs)
-				feats_merge = model_ref.net_merge(feats_backbone)
-				# feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
-				# feats_norm = model_ref.net_norm(feats_norm)   
-				# feats_norm = feats_norm.permute(0, 3, 1, 2)
-				all_features.append(feats_merge.detach().cpu())
-
-		# Gộp tất cả features: N x C x H x W
-		full_features = torch.cat(all_features, dim=0)
-		N, C, H, W = full_features.shape
+		# 2. Tính Std/Variance cho từng channel
+		full_features = torch.cat(all_features, dim=0) # (N, C, H, W)
+		C = full_features.shape[1]
 		
-		# Chuyển về dạng (C, N*H*W) để tính thống kê
-		feature_np = full_features.permute(1, 0, 2, 3).reshape(C, -1).numpy()
+		# Flatten để tính std trên toàn bộ pixel của channel
+		flat_features = full_features.permute(1, 0, 2, 3).reshape(C, -1)
+		std_values = torch.std(flat_features, dim=1) # Shape (C,)
 		
-		ci_ratio = model_ref.stats_config['ci_ratio']
-		tail = (100 - ci_ratio) / 2.0
+		# 3. Tính Weight: Nghịch đảo của Std (Feature ổn định -> Weight cao)
+		# Cộng 1e-6 để tránh chia cho 0
+		weights = 1.0 / (std_values + 1e-6)
 		
-		# Chọn tử số dựa trên activation type
-		numerator = 8.0 if model_ref.activation_type == 'sigmoid' else 5.4
+		# Normalize để trung bình weight = 1 (giữ scale loss ổn định)
+		weights = weights / weights.mean()
 		
-		k_list = []
-		for c in range(C):
-			channel_data = feature_np[c]
-			lower = np.percentile(channel_data, tail)
-			upper = np.percentile(channel_data, 100 - tail)
-			r = upper - lower
-			
-			if r > 1e-6:
-				k = numerator / r
-			else:
-				k = 1.0
-			k_list.append(k)
-			
-		# Update buffer của model
-		k_tensor = torch.tensor(k_list, dtype=torch.float32).cuda()
-		model_ref.k_values.copy_(k_tensor)
-		print("\n")
-		log_msg(self.logger, f"K-Values calculated. Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}")
-		print(f"K-Values calculated.** Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}", flush=True)
-		# Giải phóng bộ nhớ
-		del all_features, full_features, feature_np
+		# 4. Lưu vào buffer của model
+		device = next(model_ref.parameters()).device 
+		weights = weights.to(device)
+		model_ref.loss_weights.copy_(weights)
+		
+		log_msg(self.logger, f"Weights Calculated. Min: {weights.min():.4f}, Max: {weights.max():.4f}")
+		
+		# Dọn dẹp
+		del all_features, full_features
 		torch.cuda.empty_cache()
 
 	def reset(self, isTrain=True):
@@ -166,7 +144,15 @@ class UniADTrainer(BaseTrainer):
 			self.imgs, _ = self.mixup_fn(self.imgs, torch.ones(self.imgs.shape[0], device=self.imgs.device))
 		with self.amp_autocast():
 			self.forward()
-			loss_mse = self.loss_terms['pixel'](self.feats_t, self.feats_s)
+			if hasattr(self.net, 'module'): weights = self.net.module.loss_weights
+			else: weights = self.net.loss_weights
+			# Reshape (C) -> (1, C, 1, 1) để nhân broadcasting
+			weights = weights.view(1, -1, 1, 1)
+			# 2. Tính Weighted MSE thủ công
+			# (Recon - Target)^2 * Weight
+			diff_sq = (self.feats_t - self.feats_s) ** 2
+			weighted_diff = diff_sq * weights
+			loss_mse = weighted_diff.mean() # Trung bình hóa
 		self.backward_term(loss_mse, self.optim)
 		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
 	
@@ -196,14 +182,14 @@ class UniADTrainer(BaseTrainer):
 		self.reset(isTrain=True)
 		self.train_loader.sampler.set_epoch(int(self.epoch)) if self.cfg.dist else None
 		if self.epoch == 0 and self.iter == 0:
-			self.calculate_k_values()
+			self.calculate_loss_weights()
 			
-			# Broadcast K values cho các GPU khác nếu dùng DDP
+			# Broadcast cho các GPU khác nếu dùng DDP
 			if self.cfg.dist:
 				if hasattr(self.net, 'module'):
-					torch.distributed.broadcast(self.net.module.k_values, src=0)
+					torch.distributed.broadcast(self.net.module.loss_weights, src=0)
 				else:
-					torch.distributed.broadcast(self.net.k_values, src=0)
+					torch.distributed.broadcast(self.net.loss_weights, src=0)
 			
 			self.net.train()
 		train_length = self.cfg.data.train_size
