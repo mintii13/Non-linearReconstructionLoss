@@ -773,20 +773,9 @@ class UniAD(nn.Module):
 		# ********************* reconstruction {'pos_embed_type': 'learned', 'hidden_dim': 256, 'nhead': 8, 'num_encoder_layers': 4, 'num_decoder_layers': 4, 'dim_feedforward': 1024, 'dropout': 0.1, 'activation': 'relu', 'normalize_before': False, 'feature_jitter': {'scale': 20.0, 'prob': 1.0}, 'neighbor_mask': {'neighbor_size': [7, 7], 'mask': [True, True, True]}, 'save_recon': {'save_dir': 'result_recon'}, 'initializer': {'method': 'xavier_uniform'}, 'feature_size': [14, 14], 'inplanes': [272], 'instrides': [16]}
 
 		self.frozen_layers = ['net_backbone']
-		self.stats_config = stats_config
-		if self.stats_config:
-			self.activation_type = self.stats_config.get('activation_type', 'sigmoid')
-		else:
-			self.activation_type = 'sigmoid'
 		out_channels = model_decoder['outplanes'][0]
-		self.register_buffer('k_values', torch.ones(out_channels, dtype=torch.float32))
-
-	def _get_activation(self):
-		if self.activation_type == 'sigmoid':
-			return torch.sigmoid
-		elif self.activation_type == 'tanh':
-			return torch.tanh
-		return torch.sigmoid
+		self.register_buffer('stat_mean', torch.zeros(out_channels, dtype=torch.float32))
+		self.register_buffer('stat_std', torch.ones(out_channels, dtype=torch.float32))
 
 	def freeze_layer(self, module):
 		module.eval()
@@ -807,28 +796,10 @@ class UniAD(nn.Module):
 		feats_merge = self.net_merge(feats_backbone)
 		feats_merge = feats_merge.detach()
 		feature_align, feature_rec, _ = self.net_ad(feats_merge)
-		if self.stats_config and self.stats_config.get('enabled', False):
-			# Reshape K để broadcast: (1, C, 1, 1)
-			k_spatial = self.k_values.view(1, -1, 1, 1)
-			act_fn = self._get_activation()
-			
-			# Scale và Activation
-			feature_align = act_fn(feature_align * k_spatial)
-			feature_rec = act_fn(feature_rec * k_spatial)
-			
-			# [QUAN TRỌNG] Tính lại Pred (Anomaly Map) dựa trên Sigmoid Features
-			# Công thức: sqrt(sum((rec - align)^2)) -> Upsample
-			pred = torch.sqrt(
-				torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True)
-			) # B x 1 x H x W
-			pred = self.net_ad.upsample(pred) # Upsample về kích thước ảnh gốc
-			
-		else:
-			# Nếu tắt tính năng thì dùng logic cũ (tính lại pred hoặc dùng pred gốc)
-			pred = torch.sqrt(
-				torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True)
-			)
-			pred = self.net_ad.upsample(pred)
+		pred = torch.sqrt(
+			torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True)
+		)
+		pred = self.net_ad.upsample(pred)
 
 		return feature_align, feature_rec, pred
 

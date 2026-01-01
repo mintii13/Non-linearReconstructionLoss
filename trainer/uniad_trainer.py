@@ -60,76 +60,47 @@ class UniADTrainer(BaseTrainer):
 		else:
 			self.wandb_run = None
 
-	def calculate_k_values(self):
-		if not self.master:
-			return
+	def calculate_gaussian_stats(self):
+		if not self.master: return
 
-		# Kiểm tra xem có bật tính năng này trong config model không
-		if not hasattr(self.net, 'module'):
-			model_ref = self.net
-		else:
-			model_ref = self.net.module
+		if hasattr(self.net, 'module'): model_ref = self.net.module
+		else: model_ref = self.net
 			
-		if not hasattr(model_ref, 'stats_config') or not model_ref.stats_config.get('enabled', False):
-			return
-
-		log_msg(self.logger, f"Started calculating K-Channel stats (CI Ratio: {model_ref.stats_config['ci_ratio']})...")
-		
+		log_msg(self.logger, "Calculating Channel-wise Gaussian Stats (Mean & Std)...")
 		self.net.eval()
 		train_loader = iter(self.train_loader)
 		all_features = []
 		
-		# Duyệt qua toàn bộ tập train
+		# 1. Thu thập feature
 		with torch.no_grad():
-			for i in tqdm(range(len(self.train_loader)), desc="Calculating K"):
-				try:
-					data = next(train_loader)
-				except StopIteration:
-					break
-				
+			for i in tqdm(range(len(self.train_loader)), desc="Stat Gaussian"):
+				try: data = next(train_loader)
+				except StopIteration: break
 				self.set_input(data)
-				
-				feats_backbone = model_ref.net_backbone(self.imgs)
-				feats_merge = model_ref.net_merge(feats_backbone)
-				# feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
-				# feats_norm = model_ref.net_norm(feats_norm)   
-				# feats_norm = feats_norm.permute(0, 3, 1, 2)
-				all_features.append(feats_merge.detach().cpu())
+				feats = model_ref.net_backbone(self.imgs)
+				feats = model_ref.net_merge(feats)
+				all_features.append(feats.detach().cpu())
 
-		# Gộp tất cả features: N x C x H x W
 		full_features = torch.cat(all_features, dim=0)
-		N, C, H, W = full_features.shape
+		C = full_features.shape[1]
 		
-		# Chuyển về dạng (C, N*H*W) để tính thống kê
-		feature_np = full_features.permute(1, 0, 2, 3).reshape(C, -1).numpy()
+		# 2. Tính Mean và Std cho từng channel
+		flat_features = full_features.permute(1, 0, 2, 3).reshape(C, -1)
 		
-		ci_ratio = model_ref.stats_config['ci_ratio']
-		tail = (100 - ci_ratio) / 2.0
+		mean_values = torch.mean(flat_features, dim=1) # (C,)
+		std_values = torch.std(flat_features, dim=1)   # (C,)
 		
-		# Chọn tử số dựa trên activation type
-		numerator = 8.0 if model_ref.activation_type == 'sigmoid' else 5.4
+		# 3. Lưu vào buffer
+		device = next(model_ref.parameters()).device 
 		
-		k_list = []
-		for c in range(C):
-			channel_data = feature_np[c]
-			lower = np.percentile(channel_data, tail)
-			upper = np.percentile(channel_data, 100 - tail)
-			r = upper - lower
-			
-			if r > 1e-6:
-				k = numerator / r
-			else:
-				k = 1.0
-			k_list.append(k)
-			
-		# Update buffer của model
-		k_tensor = torch.tensor(k_list, dtype=torch.float32).cuda()
-		model_ref.k_values.copy_(k_tensor)
-		print("\n")
-		log_msg(self.logger, f"K-Values calculated. Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}")
-		print(f"K-Values calculated.** Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}", flush=True)
-		# Giải phóng bộ nhớ
-		del all_features, full_features, feature_np
+		model_ref.stat_mean.copy_(mean_values.to(device))
+		model_ref.stat_std.copy_(std_values.to(device))
+		
+		log_msg(self.logger, f"Gaussian Stats Calculated.")
+		log_msg(self.logger, f"   >> Mean Range: [{mean_values.min():.4f}, {mean_values.max():.4f}]")
+		log_msg(self.logger, f"   >> Std Range : [{std_values.min():.4f}, {std_values.max():.4f}]\n")
+		
+		del all_features, full_features
 		torch.cuda.empty_cache()
 
 	def reset(self, isTrain=True):
@@ -166,7 +137,37 @@ class UniADTrainer(BaseTrainer):
 			self.imgs, _ = self.mixup_fn(self.imgs, torch.ones(self.imgs.shape[0], device=self.imgs.device))
 		with self.amp_autocast():
 			self.forward()
-			loss_mse = self.loss_terms['pixel'](self.feats_t, self.feats_s)
+			# 1. Lấy Mean và Std
+			if hasattr(self.net, 'module'): 
+				mu = self.net.module.stat_mean
+				sigma = self.net.module.stat_std
+			else: 
+				mu = self.net.stat_mean
+				sigma = self.net.stat_std
+			
+			# Reshape để broadcast: (C) -> (1, C, 1, 1)
+			mu = mu.view(1, -1, 1, 1)
+			sigma = sigma.view(1, -1, 1, 1)
+			
+			# 2. Tính Gaussian Weight cho từng Pixel (Element-wise)
+			# Chúng ta đo khoảng cách từ feature hiện tại đến Mean đã biết
+			dist_sq = (self.feats_t - mu) ** 2
+			
+			# Công thức Gaussian: exp( -dist^2 / (2 * sigma^2) )
+			# Thêm epsilon vào sigma để tránh chia 0
+			# sigma_sq = sigma**2
+			# Có thể nhân thêm hệ số vào sigma để mở rộng vùng nhận (vd: 2*sigma) nếu muốn lỏng hơn
+			var = 2.0 * (sigma ** 2) + 1e-6 
+			
+			gaussian_weight = torch.exp(-dist_sq / var)
+			
+			# Detach để gradient không lan truyền vào weight (Weight chỉ là thước đo độ tin cậy)
+			gaussian_weight = gaussian_weight.detach()
+			
+			# 3. Tính Loss: MSE có trọng số Gaussian
+			# (Rec - Align)^2 * Weight
+			diff_sq = (self.feats_t - self.feats_s) ** 2
+			loss_mse = (diff_sq * gaussian_weight).mean()
 		self.backward_term(loss_mse, self.optim)
 		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
 	
@@ -196,14 +197,16 @@ class UniADTrainer(BaseTrainer):
 		self.reset(isTrain=True)
 		self.train_loader.sampler.set_epoch(int(self.epoch)) if self.cfg.dist else None
 		if self.epoch == 0 and self.iter == 0:
-			self.calculate_k_values()
+			self.calculate_gaussian_stats()
 			
-			# Broadcast K values cho các GPU khác nếu dùng DDP
+			# Broadcast cho DDP
 			if self.cfg.dist:
 				if hasattr(self.net, 'module'):
-					torch.distributed.broadcast(self.net.module.k_values, src=0)
+					torch.distributed.broadcast(self.net.module.stat_mean, src=0)
+					torch.distributed.broadcast(self.net.module.stat_std, src=0)
 				else:
-					torch.distributed.broadcast(self.net.k_values, src=0)
+					torch.distributed.broadcast(self.net.stat_mean, src=0)
+					torch.distributed.broadcast(self.net.stat_std, src=0)
 			
 			self.net.train()
 		train_length = self.cfg.data.train_size

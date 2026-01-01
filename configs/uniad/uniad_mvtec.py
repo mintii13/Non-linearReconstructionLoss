@@ -16,12 +16,12 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 		self.stats_config = dict(
             ci_ratio=90,             # Tỷ lệ khoảng tin cậy (Confidence Interval)
             activation_type='sigmoid', # Loại hàm kích hoạt
-            enabled=True
+            enabled=False
         )
 		self.seed = 42
 		self.size = 256
 		# === 1. ĐIỀU CHỈNH EPOCH VÀ VALIDATE ===
-		self.epoch_full = 600 # Tổng số epoch
+		self.epoch_full = 500 # Tổng số epoch
 		self.warmup_epochs = 0
 		self.test_per_epoch = 50 # Validate mỗi 100 epoch
 		self.test_start_epoch = 50 # Bắt đầu validate từ epoch 1
@@ -126,9 +126,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 		self.wandb.enabled = True
 		self.wandb.project = "Ader_MVTec"
 		self.wandb.entity = None 
-		self.wandb.name = 'UniAD_SigmoidChannel90_600_512_seede42'
+		self.wandb.name = 'UniAD_gaussanChannel_500_512_seede42'
 		self.wandb.tags = ["mvtec", "anomaly-detection"]
-		self.wandb.notes = "UniAD training on MVTec-AD dataset with 600 epochs and validation every 100 epochs."
+		self.wandb.notes = "UniAD training on MVTec-AD dataset with 500 epochs and validation every 100 epochs."
 		self.wandb.mode = "online"
 		self.wandb.group = None
 		self.wandb.job_type = "train"
