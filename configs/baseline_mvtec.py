@@ -15,8 +15,8 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # Stats Config
         self.stats_config = dict(
             ci_ratio=85,            
-            activation_type='tanh',
-            enabled=True             
+            activation_type='sigmoid',
+            enabled=False        
         )
         self.seed = 42
         self.size = 256
@@ -129,11 +129,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # === WandB ===
         self.wandb = Namespace()
         self.wandb.enabled = True
-        self.wandb.project = "Ader_MVTec" 
+        self.wandb.project = "Ader_MVTec_NewIdea"
         self.wandb.entity = None 
-        self.wandb.name = 'BaselineLnorm_TanhChannel85_500_lr0.0001_512_seede42'
+        self.wandb.name = 'BaselineLnorm_500_lr0.0001_512_seede42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
-        self.wandb.notes = "baseline with tanh channel."
+        self.wandb.notes = "baseline"
         self.wandb.mode = "online"
         self.wandb.group = None
         self.wandb.job_type = "train"
