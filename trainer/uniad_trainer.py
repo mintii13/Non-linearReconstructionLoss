@@ -83,7 +83,7 @@ class FocalFrequencyLoss(nn.Module):
 class UniADTrainer(BaseTrainer):
 	def __init__(self, cfg):
 		super(UniADTrainer, self).__init__(cfg)
-		self.fft_loss_fn = FocalFrequencyLoss(loss_weight=0.1, alpha=1.0)
+		self.fft_loss_fn = FocalFrequencyLoss(loss_weight=0.0 alpha=1.0)
 		if self.master and hasattr(self.cfg, 'wandb') and self.cfg.wandb.enabled:
 			wandb_cfg = self.cfg.wandb
 		
