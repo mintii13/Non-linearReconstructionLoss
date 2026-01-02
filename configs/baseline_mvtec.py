@@ -18,7 +18,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             activation_type='sigmoid',
             enabled=False        
         )
-        self.seed = 42
+        self.seed = 43
         self.size = 256
         
         # === Trainer Settings ===
