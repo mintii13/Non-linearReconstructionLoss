@@ -121,10 +121,10 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         # === WandB ===
         self.wandb = Namespace()
-        self.wandb.enabled = False
-        self.wandb.project = "Ader_MVTec" 
+        self.wandb.enabled = True
+        self.wandb.project = "Ader_MVTec_NewIdea" 
         self.wandb.entity = None 
-        self.wandb.name = 'Baseline_stat_channelweight_500_512_seede42'
+        self.wandb.name = 'Baseline_statNormClipChannelWeighting_500_lr0.0001_512_seede42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with tanh channel."
         self.wandb.mode = "online"

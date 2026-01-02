@@ -95,20 +95,18 @@ class UniADTrainer(BaseTrainer):
 		# ======================================
 
 		# === LOGIC TÍNH WEIGHT ===
-		# 1. Softening: Dùng sqrt để giảm độ gắt
-		soft_std = torch.sqrt(std_values)
-		
-		# 2. Ngăn chia cho số 0 hoặc số quá nhỏ (Dead channels)
-		soft_std = torch.clamp(soft_std, min=0.01)
-		
-		# 3. Tính weight nghịch đảo
-		weights = 1.0 / soft_std
-		
-		# 4. Normalize về mean = 1
-		weights = weights / weights.mean()
-		
-		# 5. Hard Clipping: Giới hạn weight
-		weights = torch.clamp(weights, min=0.5, max=5.0)
+		# MỚI: Dùng trực tiếp std vì dữ liệu Min > 3 (rất an toàn)
+        soft_std = std_values 
+        
+        # Vẫn giữ cái này để phòng hờ trường hợp xấu (dù hiện tại ko cần)
+        soft_std = torch.clamp(soft_std, min=0.01)
+        
+        # Tính weight nghịch đảo (Mạnh tay hơn)
+        weights = 1.0 / soft_std
+        
+        # Normalize & Clip (Vẫn cần để giữ ổn định)
+        weights = weights / weights.mean()
+        weights = torch.clamp(weights, min=0.5, max=5.0)
 		# =========================
 		
 		device = next(model_ref.parameters()).device 
