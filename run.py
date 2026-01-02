@@ -7,7 +7,7 @@ import warnings
 import torch
 warnings.filterwarnings("ignore")
 
-def seed_everything(seed=44):
+def seed_everything(seed=45):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
@@ -33,5 +33,5 @@ def main():
 
 
 if __name__ == '__main__':
-	seed_everything(44)
+	seed_everything(45)
 	main()
