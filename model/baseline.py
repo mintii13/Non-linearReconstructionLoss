@@ -57,7 +57,6 @@ class Baseline(nn.Module):
         pos_embed_type,
         save_recon,
         initializer,
-        stats_config,
         **kwargs,
     ):
         super().__init__()
@@ -95,29 +94,11 @@ class Baseline(nn.Module):
         self.decoder = TransformerDecoder(decoder_layer, kwargs.get('num_decoder_layers', 4), decoder_norm, return_intermediate=False)
         
         self.output_proj = nn.Linear(hidden_dim, inplanes[0])
-        self.stats_config = stats_config
-        self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
-        
-        # Xử lý K values
-        global k_list 
-        k_list = stats_config.get('k_values_272', None) if stats_config else None
-        
-        if k_list is None or len(k_list) != self.input_channel_dim:
-            k_tensor = torch.ones(self.input_channel_dim, dtype=torch.float32)
-        else:
-            k_tensor = torch.tensor(k_list, dtype=torch.float32)
-            
-        self.channel_k_values = nn.Parameter(k_tensor, requires_grad=False)
+        self.register_buffer('loss_weights', torch.ones(inplanes[0], dtype=torch.float32))
         self.upsample = nn.UpsamplingBilinear2d(scale_factor=instrides[0])
 
         initialize_from_cfg(self, initializer)
     
-    def _get_activation_fn_from_config(self, activation_type: str):
-        if activation_type == 'sigmoid': return torch.sigmoid
-        elif activation_type == 'tanh': return torch.tanh
-        elif activation_type == 'arctan': return torch.atan
-        return torch.sigmoid
-
     def add_jitter(self, feature_tokens, scale, prob):
         if random.uniform(0, 1) <= prob:
             num_tokens, batch_size, dim_channel = feature_tokens.shape
@@ -135,12 +116,6 @@ class Baseline(nn.Module):
             feature_tokens = self.add_jitter(feature_tokens, self.feature_jitter.scale, self.feature_jitter.prob)
         
         feature_tokens = self.input_proj(feature_tokens)
-        
-        k_channel_values = self.channel_k_values.to(feature_align.device)
-        k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
-        k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
-        
-        activation_fn = self._get_activation_fn_from_config(self.activation_type)
         feature_tokens = F.layer_norm(feature_tokens, feature_tokens.shape[-1:])
         
         pos_embed = self.pos_embed(feature_tokens)
@@ -148,26 +123,7 @@ class Baseline(nn.Module):
         decoded_tokens = self.decoder(encoded_tokens, encoded_tokens, pos=pos_embed)
         
         feature_rec_tokens = self.output_proj(decoded_tokens)
-        is_stats_enabled = self.stats_config is not None and self.stats_config.get('enabled', False)
-
-        if is_stats_enabled:
-            # Lấy K values
-            k_channel_values = self.channel_k_values.to(feature_align.device)
-            k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
-            k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
-            
-            # Lấy hàm activation (Sigmoid)
-            activation_fn = self._get_activation_fn_from_config(self.activation_type)
-            
-            # Áp dụng K và Sigmoid cho Reconstruction
-            feature_rec_tokens = activation_fn(feature_rec_tokens * k_token_aligned)
-            feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
-            
-            feature_align = activation_fn(feature_align * k_spatial_aligned)
-            
-        else:
-            feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
-            feature_align = feature_align
+        feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
         
         pred = torch.sqrt(torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True))
         pred = self.upsample(pred)
@@ -371,7 +327,7 @@ def build_position_embedding(pos_embed_type, feature_size, hidden_dim):
 # 4. Baseline Wrapper Class (Nối mọi thứ lại)
 # ==========================================
 class BaselineWrapper(nn.Module):
-    def __init__(self, model_backbone, model_decoder, stats_config=None):
+    def __init__(self, model_backbone, model_decoder):
         super().__init__()
         self.net_backbone = get_model(model_backbone)
         self.net_merge = MFCN(
@@ -392,7 +348,6 @@ class BaselineWrapper(nn.Module):
             pos_embed_type='learned', 
             save_recon=Namespace(**{'save_dir': 'result_recon'}),
             initializer={'method': 'xavier_uniform'}, 
-            stats_config=stats_config,
             nhead=8, 
             num_encoder_layers=4,
             num_decoder_layers=4, 
@@ -403,13 +358,9 @@ class BaselineWrapper(nn.Module):
         )
 
         self.frozen_layers = ['net_backbone']
-        self.stats_config = stats_config
     @property
-    def activation_type(self):
-        return self.net_ad.activation_type
-    @property
-    def k_values(self):
-        return self.net_ad.channel_k_values
+    def loss_weights(self):
+        return self.net_ad.loss_weights
 
     def freeze_layer(self, module):
         module.eval()

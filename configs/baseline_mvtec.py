@@ -12,12 +12,6 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         cfg_dataset_default.__init__(self)
         cfg_model_uniad.__init__(self)
 
-        # Stats Config
-        self.stats_config = dict(
-            ci_ratio=85,            
-            activation_type='tanh',
-            enabled=True             
-        )
         self.seed = 42
         self.size = 256
         
@@ -84,7 +78,6 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
-            stats_config=self.stats_config
         )
 
         # Evaluator, Optimizer
@@ -128,10 +121,10 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         # === WandB ===
         self.wandb = Namespace()
-        self.wandb.enabled = True
+        self.wandb.enabled = False
         self.wandb.project = "Ader_MVTec" 
         self.wandb.entity = None 
-        self.wandb.name = 'BaselineLnorm_TanhChannel85_500_lr0.0001_512_seede42'
+        self.wandb.name = 'Baseline_stat_channelweight_500_512_seede42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with tanh channel."
         self.wandb.mode = "online"
