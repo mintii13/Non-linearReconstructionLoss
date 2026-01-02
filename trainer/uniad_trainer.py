@@ -96,17 +96,17 @@ class UniADTrainer(BaseTrainer):
 
 		# === LOGIC TÍNH WEIGHT ===
 		# MỚI: Dùng trực tiếp std vì dữ liệu Min > 3 (rất an toàn)
-        soft_std = std_values 
-        
-        # Vẫn giữ cái này để phòng hờ trường hợp xấu (dù hiện tại ko cần)
-        soft_std = torch.clamp(soft_std, min=0.01)
-        
-        # Tính weight nghịch đảo (Mạnh tay hơn)
-        weights = 1.0 / soft_std
-        
-        # Normalize & Clip (Vẫn cần để giữ ổn định)
-        weights = weights / weights.mean()
-        weights = torch.clamp(weights, min=0.5, max=5.0)
+		soft_std = std_values 
+		
+		# Vẫn giữ cái này để phòng hờ trường hợp xấu (dù hiện tại ko cần)
+		soft_std = torch.clamp(soft_std, min=0.01)
+		
+		# Tính weight nghịch đảo (Mạnh tay hơn)
+		weights = 1.0 / soft_std
+		
+		# Normalize & Clip (Vẫn cần để giữ ổn định)
+		weights = weights / weights.mean()
+		weights = torch.clamp(weights, min=0.5, max=5.0)
 		# =========================
 		
 		device = next(model_ref.parameters()).device 
