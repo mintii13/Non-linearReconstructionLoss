@@ -430,7 +430,28 @@ class ViTAD(nn.Module):
 		feats_t = [f.detach() for f in feats_t]
 		feats_n = [f.detach() for f in feats_n]
 		feats_s = self.net_s(self.net_fusion(feats_n))
-
+		normed_feats_t = []
+		for f in feats_t:
+			# f shape: (B, C, H, W)
+			# Permute về (B, H, W, C) để norm trên kênh C
+			f_perm = f.permute(0, 2, 3, 1)
+			
+			# Sử dụng Functional LayerNorm
+			# normalized_shape=(C,) -> Norm dọc theo chiều Channels tại mỗi pixel
+			# weight=None, bias=None -> elementwise_affine=False (Mean=0, Std=1)
+			f_norm = torch.nn.functional.layer_norm(
+				f_perm, 
+				(f_perm.shape[-1],), 
+				weight=None, 
+				bias=None, 
+				eps=1e-6
+			)
+			
+			# Permute ngược lại về (B, C, H, W)
+			normed_feats_t.append(f_norm.permute(0, 3, 1, 2))
+		
+		# Cập nhật feats_t thành bản đã normalized
+		feats_t = normed_feats_t
 		if self.use_stats:
 			act_fn = self._get_activation()
 			
