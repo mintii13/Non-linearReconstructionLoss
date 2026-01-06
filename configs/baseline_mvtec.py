@@ -80,11 +80,12 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.model.name = 'baseline' 
         self.model.kwargs = dict(
             pretrained=False, 
-            checkpoint_path='', 
+            checkpoint_path='runs/Baseline_SigmoidChannel90_600_lr0.0002_256_512dim/ckpt.pth', 
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
-            stats_config=self.stats_config
+            stats_config=self.stats_config,
+            dist_metric='maha'
         )
 
         # Evaluator, Optimizer
@@ -128,7 +129,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         # === WandB ===
         self.wandb = Namespace()
-        self.wandb.enabled = True
+        self.wandb.enabled = False
         self.wandb.project = "Ader_MVTec_NewIdea"
         self.wandb.entity = None 
         self.wandb.name = 'BaselineLnorm_500_lr0.0001_512_seede42'

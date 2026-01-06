@@ -12,6 +12,44 @@ from typing import Optional
 import numpy as np
 
 from model import get_model, MODEL
+def compute_inv_covariance(model, dataloader, device):
+    """
+    Hàm này chạy qua toàn bộ tập train để tính ma trận hiệp phương sai của lỗi tái tạo (error residuals).
+    """
+    model.eval()
+    all_diffs = []
+    
+    print("Computing Covariance Matrix...")
+    with torch.no_grad():
+        for imgs in dataloader:
+            imgs = imgs.to(device)
+            # Lấy features từ model
+            feat_align, feat_rec, _ = model(imgs)
+            
+            # Tính hiệu số: (Rec - Align)
+            # Ta cần tính covariance của cái "lỗi" này
+            diff = feat_rec - feat_align # [B, C, H, W]
+            
+            # Chuyển về [N, C] để tính cov
+            diff = diff.permute(0, 2, 3, 1).reshape(-1, diff.shape[1])
+            all_diffs.append(diff.cpu()) # Đưa về CPU để đỡ tốn VRAM
+            
+    # Nối tất cả lại: [Total_Pixels, C]
+    all_diffs = torch.cat(all_diffs, dim=0)
+    
+    # Tính Covariance Matrix bằng numpy
+    numpy_diffs = all_diffs.numpy()
+    cov_matrix = np.cov(numpy_diffs, rowvar=False)
+    
+    # Tính Inverse Covariance
+    # Cộng thêm 1 chút epsilon vào đường chéo để tránh lỗi Singularity (ma trận không nghịch đảo được)
+    epsilon = 1e-5
+    cov_matrix = cov_matrix + np.eye(cov_matrix.shape[0]) * epsilon
+    inv_cov_matrix = np.linalg.inv(cov_matrix)
+    
+    # Cập nhật vào model
+    model.net_ad.inv_covariance.data = torch.from_numpy(inv_cov_matrix).float().to(device)
+    print("Inverse Covariance Matrix updated!")
 
 # ==========================================
 # 1. MFCN (Neck)
@@ -58,6 +96,7 @@ class Baseline(nn.Module):
         save_recon,
         initializer,
         stats_config,
+        dist_metric='maha',
         **kwargs,
     ):
         super().__init__()
@@ -96,6 +135,7 @@ class Baseline(nn.Module):
         
         self.output_proj = nn.Linear(hidden_dim, inplanes[0])
         self.stats_config = stats_config
+        self.dist_metric = dist_metric
         self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
         
         # Xử lý K values
@@ -109,6 +149,11 @@ class Baseline(nn.Module):
             
         self.channel_k_values = nn.Parameter(k_tensor, requires_grad=False)
         self.upsample = nn.UpsamplingBilinear2d(scale_factor=instrides[0])
+        # Khởi tạo ma trận Inverse Covariance (C x C)
+        # C là số kênh (channel) đầu vào của features
+        c_dim = inplanes[0] 
+        # Đăng ký buffer để nó được lưu vào state_dict nhưng không update qua gradient
+        self.register_buffer("inv_covariance", torch.eye(c_dim))
 
         initialize_from_cfg(self, initializer)
     
@@ -169,7 +214,29 @@ class Baseline(nn.Module):
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
             feature_align = feature_align
         
-        pred = torch.sqrt(torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True))
+        # 1. Tính hiệu số (Delta): shape [B, C, H, W]
+        diff = feature_rec - feature_align
+        if self.training or self.dist_metric == 'euclid':
+            # === TRAINING: Dùng Euclidean (Nhanh & Ổn định) ===
+            # Tương đương với Mahalanobis khi inv_covariance là Identity
+            # Tính tổng bình phương lỗi trên dim C
+            dist_sq = torch.sum(diff ** 2, dim=1)
+        else:
+            # 2. Đổi chiều để nhân ma trận: shape [B, H, W, C]
+            diff_perm = diff.permute(0, 2, 3, 1)
+
+            # 3. Nhân với ma trận nghịch đảo hiệp phương sai (VI): (u - v) * VI
+            # diff_perm: [..., C], inv_covariance: [C, C] -> output: [..., C]
+            # Lưu ý: inv_covariance phải cùng device với diff
+            left_mult = torch.matmul(diff_perm, self.inv_covariance)
+
+            # 4. Nhân tiếp với hiệu số gốc: (Result of step 3) * (u - v)^T
+            # Ta dùng phép nhân element-wise rồi sum theo dimension cuối (C)
+            dist_sq = torch.sum(left_mult * diff_perm, dim=-1) # Output shape: [B, H, W]
+
+        # 5. Căn bậc 2 và unsqueeze để trả về shape [B, 1, H, W]
+        pred = torch.sqrt(torch.clamp(dist_sq, min=0.0)) # clamp để tránh lỗi số học âm cực nhỏ
+        pred = pred.unsqueeze(1)
         pred = self.upsample(pred)
         
         # Trả về output_dict như yêu cầu của class Baseline
@@ -371,7 +438,7 @@ def build_position_embedding(pos_embed_type, feature_size, hidden_dim):
 # 4. Baseline Wrapper Class (Nối mọi thứ lại)
 # ==========================================
 class BaselineWrapper(nn.Module):
-    def __init__(self, model_backbone, model_decoder, stats_config=None):
+    def __init__(self, model_backbone, model_decoder, stats_config=None, dist_metric='maha', **kwargs):
         super().__init__()
         self.net_backbone = get_model(model_backbone)
         self.net_merge = MFCN(
@@ -393,6 +460,7 @@ class BaselineWrapper(nn.Module):
             save_recon=Namespace(**{'save_dir': 'result_recon'}),
             initializer={'method': 'xavier_uniform'}, 
             stats_config=stats_config,
+            dist_metric=dist_metric,
             nhead=8, 
             num_encoder_layers=4,
             num_decoder_layers=4, 
@@ -428,12 +496,12 @@ class BaselineWrapper(nn.Module):
     def forward(self, imgs):
         feats_backbone = self.net_backbone(imgs)
         feats_merge = self.net_merge(feats_backbone)
-        # 1. Permute
-        feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
-        # 2. Norm
-        feats_norm = self.net_norm(feats_norm)
-        # 3. Permute back
-        feats_merge = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
+        # # 1. Permute
+        # feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
+        # # 2. Norm
+        # feats_norm = self.net_norm(feats_norm)
+        # # 3. Permute back
+        # feats_merge = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
         feats_norm = feats_merge.detach()
         
         output_dict = self.net_ad(feats_norm)
