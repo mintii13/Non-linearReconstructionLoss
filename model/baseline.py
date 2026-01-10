@@ -72,6 +72,7 @@ class Baseline(nn.Module):
         self.input_channel_dim = inplanes[0]
         self.hidden_dim = hidden_dim
         self.input_proj = nn.Linear(inplanes[0], hidden_dim)
+        self.instance_norm = nn.InstanceNorm1d(hidden_dim, affine=False)
         encoder_layer = TransformerEncoderLayer(
             hidden_dim, 
             kwargs.get('nhead', 8), 
@@ -140,8 +141,9 @@ class Baseline(nn.Module):
         k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
         k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
         
-        activation_fn = self._get_activation_fn_from_config(self.activation_type)
-        feature_tokens = F.layer_norm(feature_tokens, feature_tokens.shape[-1:])
+        feature_tokens = feature_tokens.permute(1, 2, 0) # -> (B, C, L)
+        feature_tokens = self.instance_norm(feature_tokens)
+        feature_tokens = feature_tokens.permute(2, 0, 1) # -> (L, B, C)
         
         pos_embed = self.pos_embed(feature_tokens)
         encoded_tokens = self.encoder(feature_tokens, pos=pos_embed)
