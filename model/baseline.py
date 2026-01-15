@@ -141,9 +141,9 @@ class Baseline(nn.Module):
         k_token_aligned = k_channel_values.unsqueeze(0).unsqueeze(0) 
         k_spatial_aligned = k_channel_values.view(1, -1, 1, 1)
         
-        feature_tokens = feature_tokens.permute(1, 2, 0) # -> (B, C, L)
-        feature_tokens = self.instance_norm(feature_tokens)
-        feature_tokens = feature_tokens.permute(2, 0, 1) # -> (L, B, C)
+        # feature_tokens = feature_tokens.permute(1, 2, 0) # -> (B, C, L)
+        # feature_tokens = self.instance_norm(feature_tokens)
+        # feature_tokens = feature_tokens.permute(2, 0, 1) # -> (L, B, C)
         
         pos_embed = self.pos_embed(feature_tokens)
         encoded_tokens = self.encoder(feature_tokens, pos=pos_embed)
