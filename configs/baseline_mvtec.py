@@ -88,7 +88,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # Trainer config
         self.trainer.name = 'UniADTrainer' 
         self.trainer.logdir_sub = ''
-        self.trainer.resume_dir = ''
+        self.trainer.resume_dir = 'checkpoint/Mvtec/Baseline'
         self.trainer.epoch_full = self.epoch_full
         
         self.trainer.scheduler_kwargs = dict(
@@ -121,7 +121,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         # === WandB ===
         self.wandb = Namespace()
-        self.wandb.enabled = True
+        self.wandb.enabled = False
         self.wandb.project = "Ader_MVTec_NewIdea" 
         self.wandb.entity = None 
         self.wandb.name = 'Baseline_statNormClipChannelWeighting_500_lr0.0001_512_seede42'

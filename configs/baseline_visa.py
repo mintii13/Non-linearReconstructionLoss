@@ -12,17 +12,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         cfg_dataset_default.__init__(self)
         cfg_model_uniad.__init__(self)
 
-        # Stats Config
-        self.stats_config = dict(
-            ci_ratio=90,            
-            activation_type='sigmoid',
-            enabled=True             
-        )
         self.seed = 42
         self.size = 256
         
         # === Trainer Settings ===
-        self.epoch_full = 500
+        self.epoch_full = 250
         self.warmup_epochs = 0
         self.test_per_epoch = 50
         self.test_start_epoch = 50
@@ -84,7 +78,6 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
-            stats_config=self.stats_config
         )
 
         # Evaluator, Optimizer
@@ -95,7 +88,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # Trainer config
         self.trainer.name = 'UniADTrainer' 
         self.trainer.logdir_sub = ''
-        self.trainer.resume_dir = ''
+        self.trainer.resume_dir = 'checkpoint/VisA/WeightedChannel'
         self.trainer.epoch_full = self.epoch_full
         
         self.trainer.scheduler_kwargs = dict(
@@ -128,11 +121,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         # === WandB ===
         self.wandb = Namespace()
-        self.wandb.enabled = True
+        self.wandb.enabled = False
         self.wandb.project = "Ader_VisA" 
         self.wandb.entity = None 
-        self.wandb.name = 'Baseline_SigmoidChannel90_500_lr0.0001_512_seede42'
-        self.wandb.tags = ["mvtec", "baseline", "replica"]
+        self.wandb.name = 'Baseline_250_lr0.0001_512_seede42'
+        self.wandb.tags = ["visa", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"
         self.wandb.group = None
