@@ -105,6 +105,7 @@ class Baseline(nn.Module):
         k_tensor = torch.tensor([k_value], dtype=torch.float32) # Dùng tensor 1 phần tử 
         self.k_value = nn.Parameter(k_tensor, requires_grad=False)
         self.upsample = nn.UpsamplingBilinear2d(scale_factor=instrides[0])
+        self.feature_norm = nn.LayerNorm(inplanes[0], elementwise_affine=False)
 
         initialize_from_cfg(self, initializer)
     
@@ -129,8 +130,10 @@ class Baseline(nn.Module):
         
         if self.training and self.feature_jitter:
             feature_tokens = self.add_jitter(feature_tokens, self.feature_jitter.scale, self.feature_jitter.prob)
+        # Feature Norm
+        feats_norm = self.feature_norm(feature_tokens)
         
-        feature_tokens = self.input_proj(feature_tokens)
+        feature_tokens = self.input_proj(feats_norm)
         
         feature_tokens = feature_tokens.permute(1, 2, 0) # -> (B, C, L)
         feature_tokens = self.instance_norm(feature_tokens)
@@ -371,7 +374,6 @@ class BaselineWrapper(nn.Module):
             instrides=[2, 4, 8, 16], 
             outstrides=[16]
         )
-        self.net_norm = nn.LayerNorm(model_decoder['outplanes'][0], elementwise_affine=False)
         # Khởi tạo Baseline
         self.net_ad = Baseline(
             inplanes=model_decoder['outplanes'], 
@@ -419,15 +421,8 @@ class BaselineWrapper(nn.Module):
     def forward(self, imgs):
         feats_backbone = self.net_backbone(imgs)
         feats_merge = self.net_merge(feats_backbone)
-        # 1. Permute
-        feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
-        # 2. Norm
-        feats_norm = self.net_norm(feats_norm)
-        # 3. Permute back
-        feats_merge = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
-        feats_norm = feats_merge.detach()
-        
-        output_dict = self.net_ad(feats_norm)
+        feats_merge = feats_merge.detach()
+        output_dict = self.net_ad(feats_merge)
         
         # Tách dict thành tuple để trả về cho Trainer
         feature_align = output_dict['feature_align']
