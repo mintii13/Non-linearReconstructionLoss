@@ -13,6 +13,23 @@ import numpy as np
 
 from model import get_model, MODEL
 
+class RMSNorm(nn.Module):
+    def __init__(self, dim, eps=1e-6):
+        super().__init__()
+        self.eps = eps
+        
+    def forward(self, x):
+        # 1. Tính bình phương trung bình (Mean Square)
+        # x^2 -> mean
+        ms = x.pow(2).mean(dim=-1, keepdim=True)
+        
+        # 2. Tính nghịch đảo của căn bậc hai (1 / sqrt(MS + eps))
+        # rsqrt là (reciprocal sqrt) giúp tính toán nhanh hơn
+        divisor = torch.rsqrt(ms + self.eps)
+        
+        # 3. Nhân vào x (Tương đương x / RMS)
+        return x * divisor
+
 # ==========================================
 # 1. MFCN (Neck)
 # ==========================================
@@ -105,7 +122,7 @@ class Baseline(nn.Module):
         k_tensor = torch.tensor([k_value], dtype=torch.float32) # Dùng tensor 1 phần tử 
         self.k_value = nn.Parameter(k_tensor, requires_grad=False)
         self.upsample = nn.UpsamplingBilinear2d(scale_factor=instrides[0])
-        self.feature_norm = nn.LayerNorm(inplanes[0], elementwise_affine=False)
+        self.feature_norm = RMSNorm(inplanes[0])
 
         initialize_from_cfg(self, initializer)
     
