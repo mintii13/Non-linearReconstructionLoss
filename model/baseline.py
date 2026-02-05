@@ -105,6 +105,7 @@ class Baseline(nn.Module):
         k_tensor = torch.tensor([k_value], dtype=torch.float32) # Dùng tensor 1 phần tử 
         self.k_value = nn.Parameter(k_tensor, requires_grad=False)
         self.upsample = nn.UpsamplingBilinear2d(scale_factor=instrides[0])
+        self.feature_norm = nn.LayerNorm(inplanes[0], elementwise_affine=False)
 
         initialize_from_cfg(self, initializer)
     
@@ -126,9 +127,13 @@ class Baseline(nn.Module):
     def forward(self, feature_align):
         # feature_align: B x C X H x W
         feature_tokens = rearrange(feature_align, "b c h w -> (h w) b c")
+        # Feature Norm
+        feature_norm = self.feature_norm(feature_tokens)
         
         if self.training and self.feature_jitter:
-            feature_tokens = self.add_jitter(feature_tokens, self.feature_jitter.scale, self.feature_jitter.prob)
+            feature_tokens = self.add_jitter(feature_norm, self.feature_jitter.scale, self.feature_jitter.prob)
+        else:
+            feature_tokens = feature_norm
         
         feature_tokens = self.input_proj(feature_tokens)
         
@@ -154,11 +159,12 @@ class Baseline(nn.Module):
             feature_rec_tokens = activation_fn(feature_rec_tokens * k_value)
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
             
-            feature_align = activation_fn(feature_align * k_value)
+            feature_align = activation_fn(feature_norm * k_value)
+            feature_align = rearrange(feature_align, "(h w) b c -> b c h w", h=self.feature_size[0])
             
         else:
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
-            feature_align = feature_align
+            feature_align = rearrange(feature_norm, "(h w) b c -> b c h w", h=self.feature_size[0])
         
         pred = torch.sqrt(torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True))
         pred = self.upsample(pred)
@@ -371,7 +377,6 @@ class BaselineWrapper(nn.Module):
             instrides=[2, 4, 8, 16], 
             outstrides=[16]
         )
-        self.net_norm = nn.LayerNorm(model_decoder['outplanes'][0], elementwise_affine=False)
         # Khởi tạo Baseline
         self.net_ad = Baseline(
             inplanes=model_decoder['outplanes'], 
@@ -419,15 +424,8 @@ class BaselineWrapper(nn.Module):
     def forward(self, imgs):
         feats_backbone = self.net_backbone(imgs)
         feats_merge = self.net_merge(feats_backbone)
-        # 1. Permute
-        feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
-        # 2. Norm
-        feats_norm = self.net_norm(feats_norm)
-        # 3. Permute back
-        feats_merge = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
-        feats_norm = feats_merge.detach()
-        
-        output_dict = self.net_ad(feats_norm)
+        feats_merge = feats_merge.detach()
+        output_dict = self.net_ad(feats_merge)
         
         # Tách dict thành tuple để trả về cho Trainer
         feature_align = output_dict['feature_align']
