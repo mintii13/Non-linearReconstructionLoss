@@ -122,7 +122,7 @@ class Baseline(nn.Module):
         k_tensor = torch.tensor([k_value], dtype=torch.float32) # Dùng tensor 1 phần tử 
         self.k_value = nn.Parameter(k_tensor, requires_grad=False)
         self.upsample = nn.UpsamplingBilinear2d(scale_factor=instrides[0])
-        self.feature_norm = RMSNorm(inplanes[0])
+        self.feature_norm = nn.InstanceNorm2d(inplanes[0], affine=False)
 
         initialize_from_cfg(self, initializer)
     
@@ -143,9 +143,8 @@ class Baseline(nn.Module):
     
     def forward(self, feature_align):
         # feature_align: B x C X H x W
-        feature_tokens = rearrange(feature_align, "b c h w -> (h w) b c")
-        # Feature Norm
-        feature_norm = self.feature_norm(feature_tokens)
+        feature_tokens = self.feature_norm(feature_align)
+        feature_norm = rearrange(feature_tokens, "b c h w -> (h w) b c")
         
         if self.training and self.feature_jitter:
             feature_tokens = self.add_jitter(feature_norm, self.feature_jitter.scale, self.feature_jitter.prob)
@@ -154,7 +153,9 @@ class Baseline(nn.Module):
         
         feature_tokens = self.input_proj(feature_tokens)
         
-        feature_tokens = F.layer_norm(feature_tokens, feature_tokens.shape[-1:])
+        feature_tokens = feature_tokens.permute(1, 2, 0) # -> (B, C, L)
+        feature_tokens = self.instance_norm(feature_tokens)
+        feature_tokens = feature_tokens.permute(2, 0, 1) # -> (L, B, C)
         
         pos_embed = self.pos_embed(feature_tokens)
         encoded_tokens = self.encoder(feature_tokens, pos=pos_embed)
