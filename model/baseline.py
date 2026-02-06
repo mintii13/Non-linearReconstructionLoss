@@ -153,9 +153,7 @@ class Baseline(nn.Module):
         
         feature_tokens = self.input_proj(feature_tokens)
         
-        feature_tokens = feature_tokens.permute(1, 2, 0) # -> (B, C, L)
-        feature_tokens = self.instance_norm(feature_tokens)
-        feature_tokens = feature_tokens.permute(2, 0, 1) # -> (L, B, C)
+        feature_tokens = F.layer_norm(feature_tokens, feature_tokens.shape[-1:])
         
         pos_embed = self.pos_embed(feature_tokens)
         encoded_tokens = self.encoder(feature_tokens, pos=pos_embed)
