@@ -80,11 +80,15 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.model.name = 'baseline' 
         self.model.kwargs = dict(
             pretrained=False, 
-            checkpoint_path='', 
+            checkpoint_path='',
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
             stats_config=self.stats_config
+            memory_mode='both',           # Tùy chọn: 'channel', 'spatial', 'both', 'none'
+            fusion_mode='concat',         # Tùy chọn: 'concat', 'add', 'gate', 'weighted_sum'
+            channel_memory_size=256,
+            spatial_memory_size=256,
         )
 
         # Evaluator, Optimizer
