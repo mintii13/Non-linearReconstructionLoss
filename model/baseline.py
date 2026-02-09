@@ -308,9 +308,9 @@ class Baseline(nn.Module):
                 )
                 self.fusion_layer = nn.Identity()
             else:
-                 self.fusion_layer = nn.Identity() # fallback
+                self.fusion_layer = nn.Identity() # fallback
         else:
-             self.fusion_layer = nn.Identity()
+            self.fusion_layer = nn.Identity()
         # ==============================================================
         encoder_layer = TransformerEncoderLayer(
             hidden_dim, 
@@ -411,7 +411,7 @@ class Baseline(nn.Module):
                 memory_features = channel_features + spatial_features
             elif self.fusion_mode == 'multiply':
                 memory_features = channel_features * spatial_features
-            elif self.fusion_mode == 'add_linear':
+            elif self.fusion_mode == 'addlinear':
                 added_features = channel_features + spatial_features
                 memory_features = self.fusion_layer(added_features)
             elif self.fusion_mode == 'weighted_sum':
@@ -422,8 +422,8 @@ class Baseline(nn.Module):
                 memory_features = gate * channel_features + (1 - gate) * spatial_features
             else:
                  # fallback
-                 combined_features = torch.cat([channel_features, spatial_features], dim=-1)
-                 memory_features = self.fusion_layer(combined_features)
+                combined_features = torch.cat([channel_features, spatial_features], dim=-1)
+                memory_features = self.fusion_layer(combined_features)
         # ==================================================================
 
 
