@@ -363,8 +363,8 @@ class Baseline(nn.Module):
     
     def forward(self, feature_align):
         # feature_align: B x C X H x W
-        feature_tokens = self.feature_norm(feature_align)
-        feature_norm = rearrange(feature_tokens, "b c h w -> (h w) b c")
+        # feature_tokens = self.feature_norm(feature_align)
+        feature_norm = rearrange(feature_align, "b c h w -> (h w) b c")
         
         if self.training and self.feature_jitter:
             feature_tokens = self.add_jitter(feature_norm, self.feature_jitter.scale, self.feature_jitter.prob)
@@ -655,7 +655,7 @@ def build_position_embedding(pos_embed_type, feature_size, hidden_dim):
 # 4. Baseline Wrapper Class (Nối mọi thứ lại)
 # ==========================================
 class BaselineWrapper(nn.Module):
-    def __init__(self, model_backbone, model_decoder, stats_config=None):
+    def __init__(self, model_backbone, model_decoder, stats_config=None, **kwargs):
         super().__init__()
         self.net_backbone = get_model(model_backbone)
         self.net_merge = MFCN(
@@ -682,7 +682,8 @@ class BaselineWrapper(nn.Module):
             dim_feedforward=1024, 
             dropout=0.1, 
             activation='relu',
-            normalize_before=False
+            normalize_before=False,
+            **kwargs
         )
 
         self.frozen_layers = ['net_backbone']
