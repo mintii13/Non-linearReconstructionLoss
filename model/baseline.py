@@ -18,11 +18,12 @@ class ChannelMemoryModule(nn.Module):
     Channel Memory Module - Feature-wise processing with Q/K/V projections
     Input/Output Shape: (L, B, C) where L=H*W
     """
-    def __init__(self, mem_dim, feature_dim, **kwargs):
+    def __init__(self, mem_dim, feature_dim, mem_mask_ratio=0.6, **kwargs):
         super(ChannelMemoryModule, self).__init__()
         
         self.mem_dim = mem_dim
         self.feature_dim = feature_dim
+        self.mem_mask_ratio = mem_mask_ratio
         self.scale = 1.0 / math.sqrt(feature_dim)
         
         self.memory = nn.Parameter(torch.randn(mem_dim, feature_dim))
@@ -45,12 +46,10 @@ class ChannelMemoryModule(nn.Module):
         
         attention_scores = torch.mm(queries, keys.t())
         
-        if self.training:
-            mask_ratio = 0.6
-            num_masked = int(self.mem_dim * mask_ratio)
-            if num_masked > 0:
-                mask_indices = torch.randperm(self.mem_dim, device=attention_scores.device)[:num_masked]
-                attention_scores[:, mask_indices] = float('-inf')
+        if self.training and self.mem_mask_ratio > 0:
+            num_masked = int(self.mem_dim * self.mem_mask_ratio)
+            mask_indices = torch.randperm(self.mem_dim, device=attention_scores.device)[:num_masked]
+            attention_scores[:, mask_indices] = float('-inf')
 
         attention_scores = attention_scores * self.scale
         att_weight = F.softmax(attention_scores, dim=1)
@@ -73,13 +72,14 @@ class SpatialMemoryModule(nn.Module):
     Input: (L, B, C) -> Output: (L, B, C)
     Internal processing treats (B, C) as batch of spatial maps (H, W)
     """
-    def __init__(self, mem_dim, height, width, **kwargs):
+    def __init__(self, mem_dim, height, width, mem_mask_ratio=0.6, **kwargs):
         super(SpatialMemoryModule, self).__init__()
         
         self.mem_dim = mem_dim
         self.height = height
         self.width = width
         self.spatial_dim = height * width
+        self.mem_mask_ratio = mem_mask_ratio
         self.scale = 1.0
         
         # Memory shape: [mem_dim, H, W]
@@ -150,12 +150,10 @@ class SpatialMemoryModule(nn.Module):
         # 5. Compute SSIM
         ssim_similarity = self.compute_ssim_similarity(queries_spatial, keys_spatial)
         
-        if self.training:
-            mask_ratio = 0.6
-            num_masked = int(self.mem_dim * mask_ratio)
-            if num_masked > 0:
-                mask_indices = torch.randperm(self.mem_dim, device=ssim_similarity.device)[:num_masked]
-                ssim_similarity[:, mask_indices] = float('-inf')
+        if self.training and self.mem_mask_ratio > 0:
+            num_masked = int(self.mem_dim * self.mem_mask_ratio)
+            mask_indices = torch.randperm(self.mem_dim, device=ssim_similarity.device)[:num_masked]
+            ssim_similarity[:, mask_indices] = float('-inf')
 
         attention_scores = ssim_similarity * self.scale
         att_weight = F.softmax(attention_scores, dim=1)
@@ -261,7 +259,7 @@ class Baseline(nn.Module):
         self.fusion_mode = kwargs.get('fusion_mode', 'concat')
         self.channel_memory_size = kwargs.get('channel_memory_size', 256)
         self.spatial_memory_size = kwargs.get('spatial_memory_size', 256)
-        
+        self.mem_mask_ratio = kwargs.get('mem_mask_ratio', 0.6)
         self.use_channel_memory = self.memory_mode in ['channel', 'both']
         self.use_spatial_memory = self.memory_mode in ['spatial', 'both']
         
@@ -270,20 +268,18 @@ class Baseline(nn.Module):
         
         if self.use_channel_memory:
             self.channel_memory_module = ChannelMemoryModule(
-                mem_dim=self.channel_memory_size,
-                feature_dim=hidden_dim,
-                **kwargs
+                mem_dim=kwargs.get('channel_memory_size', 256),
+                feature_dim=self.hidden_dim,
+                mem_mask_ratio=self.mem_mask_ratio
             )
-            print('-> Baseline: Initialized Channel Memory')
-            
+            print('-> Baseline: Initialized Channel Memory, mask ratio:', self.mem_mask_ratio)
         if self.use_spatial_memory:
             self.spatial_memory_module = SpatialMemoryModule(
-                mem_dim=self.spatial_memory_size,
-                height=feature_size[0],
-                width=feature_size[1],
-                **kwargs
+                mem_dim=kwargs.get('spatial_memory_size', 256),
+                height=feature_size[0], width=feature_size[1],
+                mem_mask_ratio=self.mem_mask_ratio
             )
-            print('-> Baseline: Initialized Spatial Memory')
+            print('-> Baseline: Initialized Spatial Memory, mask ratio:', self.mem_mask_ratio)
         
         # ================= Fusion Layer =================
         fusion_input_dim = hidden_dim
