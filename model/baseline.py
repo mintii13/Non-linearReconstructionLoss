@@ -407,7 +407,7 @@ class Baseline(nn.Module):
                 memory_features = channel_features + spatial_features
             elif self.fusion_mode == 'multiply':
                 memory_features = channel_features * spatial_features
-            elif self.fusion_mode == 'addlinear':
+            elif self.fusion_mode == 'add_linear':
                 added_features = channel_features + spatial_features
                 memory_features = self.fusion_layer(added_features)
             elif self.fusion_mode == 'weighted_sum':
