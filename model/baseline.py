@@ -679,7 +679,7 @@ class BaselineWrapper(nn.Module):
             normalize_before=False,
             **kwargs
         )
-
+        self.net_norm = nn.LayerNorm(model_decoder['outplanes'][0], elementwise_affine=False)
         self.frozen_layers = ['net_backbone']
         self.stats_config = stats_config
     @property
