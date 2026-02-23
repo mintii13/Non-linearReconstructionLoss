@@ -103,10 +103,16 @@ class BaseTrainer():
         self.iter_full, self.epoch_full = cfg.trainer.iter_full, cfg.trainer.epoch_full
         if cfg.trainer.resume_dir:
             state_dict = torch.load(cfg.model.kwargs['checkpoint_path'], map_location='cpu', weights_only=False)
-            self.optim.load_state_dict(state_dict['optimizer'])
-            self.scheduler.load_state_dict(state_dict['scheduler'])
-            self.loss_scaler.load_state_dict(state_dict['scaler']) if self.loss_scaler else None
-            self.cfg.task_start_time = get_timepc() - state_dict['total_time']
+            if 'optimizer' in state_dict:
+                self.optim.load_state_dict(state_dict['optimizer'])
+            else:
+                print("Warning: 'optimizer' not found via resume_dir. Skipping.")
+            if 'scheduler' in state_dict:
+                self.scheduler.load_state_dict(state_dict['scheduler'])
+            if self.loss_scaler and 'scaler' in state_dict:
+                self.loss_scaler.load_state_dict(state_dict['scaler'])
+            if 'total_time' in state_dict:
+                self.cfg.task_start_time = get_timepc() - state_dict['total_time']
         # self.tmp_dir = f'/dev/shm/tmp/{cfg.logdir}'
         # tmp_dir = f'/dev/shm/tmp/tmp'
         tmp_dir = f'{cfg.trainer.checkpoint}/tmp'

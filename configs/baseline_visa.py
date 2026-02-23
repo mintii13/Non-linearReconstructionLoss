@@ -14,15 +14,15 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # Stats Config
         self.stats_config = dict(
-            ci_ratio=90,            
+            ci_ratio=95,            
             activation_type='sigmoid',
-            enabled=True             
+            enabled=False             
         )
         self.seed = 42
         self.size = 256
         
         # === Trainer Settings ===
-        self.epoch_full = 600
+        self.epoch_full = 250
         self.warmup_epochs = 0
         self.test_per_epoch = 50
         self.test_start_epoch = 50
@@ -35,9 +35,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         self.metrics = [
             'mAUROC_sp_max', 'mAUROC_px',
-            # 'mAP_sp_max', 'mF1_max_sp_max',
-            # 'mAUPRO_px', 
-            # 'mAP_px', 'mF1_max_px',
+            'mAP_sp_max', 'mF1_max_sp_max',
+            'mAUPRO_px', 
+            'mAP_px', 'mF1_max_px',
         ]
 
         # ==> Data
@@ -96,6 +96,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.trainer.name = 'UniADTrainer' 
         self.trainer.logdir_sub = ''
         self.trainer.resume_dir = ''
+        self.trainer.resume_dir = 'icme_checkpoint/visa/nosigmoid'
         self.trainer.epoch_full = self.epoch_full
         
         self.trainer.scheduler_kwargs = dict(
@@ -128,11 +129,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         # === WandB ===
         self.wandb = Namespace()
-        self.wandb.enabled = True
+        self.wandb.enabled = False
         self.wandb.project = "Ader_VisA_Global" 
         self.wandb.entity = None 
         self.wandb.name = 'Baseline_Sigmoid90_600_lr0.0001_512_seede42'
-        self.wandb.tags = ["mvtec", "baseline", "replica"]
+        self.wandb.tags = ["visa", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"
         self.wandb.group = None
@@ -141,4 +142,3 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.run_id = None
         self.wandb.dir = None
         self.wandb.login = True
-        self.wandb.api_key = "0f2ca680372a916c31aab5ede7bbefab410fe503"

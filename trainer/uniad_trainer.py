@@ -32,8 +32,8 @@ from ._base_trainer import BaseTrainer
 from . import TRAINER
 from util.vis import vis_rgb_gt_amp
 import wandb
-import setproctitle
-setproctitle.setproctitle("Minh Tri is training...")
+# import setproctitle
+# setproctitle.setproctitle("Minh Tri is training...")
 @TRAINER.register_module
 class UniADTrainer(BaseTrainer):
 	def __init__(self, cfg):
@@ -360,16 +360,18 @@ class UniADTrainer(BaseTrainer):
 				for metric in self.metrics:
 					metric_result = metric_results[metric] * 100
 					
-					# Cập nhật metric recorder (cần cho (Max))
-					self.metric_recorder[f'{metric}_{cls_name}'].append(metric_result)
+					key = f'{metric}_{cls_name}'
+					if key not in self.metric_recorder:
+						self.metric_recorder[key] = []
+					self.metric_recorder[key].append(metric_result)
 					
 					# Lưu trữ giá trị để tính trung bình cuối cùng
 					all_class_metrics[metric].append(metric_result) 
 					
-					max_metric = max(self.metric_recorder[f'{metric}_{cls_name}'])
-					max_metric_idx = self.metric_recorder[f'{metric}_{cls_name}'].index(max_metric) + 1
+					max_metric = max(self.metric_recorder[key])
+					max_metric_idx = self.metric_recorder[key].index(max_metric) + 1
 					
-					# Cập nhật thông báo (msg) cho từng class (vẫn cần để in ra bảng)
+					# Cập nhật thông báo (msg) cho từng class
 					msg[metric] = msg.get(metric, [])
 					msg[metric].append(metric_result)
 					msg[f'{metric} (Max)'] = msg.get(f'{metric} (Max)', [])
@@ -379,17 +381,17 @@ class UniADTrainer(BaseTrainer):
 						# Tính trung bình (Avg)
 						metric_result_avg = sum(all_class_metrics[metric]) / len(all_class_metrics[metric])
 						
-						# Cập nhật metric recorder Avg
-						self.metric_recorder[f'{metric}_Avg'].append(metric_result_avg)
+						avg_key = f'{metric}_Avg'
+						if avg_key not in self.metric_recorder:
+							self.metric_recorder[avg_key] = []
+						self.metric_recorder[avg_key].append(metric_result_avg)
 						
-						# === LOG WANDB (CHỈ AVG) ===
-						wandb_metric_log[f'Test/Avg/{metric}'] = metric_result_avg / 100.0 # Log giá trị 0-1
+						wandb_metric_log[f'Test/Avg/{metric}'] = metric_result_avg / 100.0 
 						
-						# Cập nhật thông báo (msg) cho hàng Avg
-						max_metric = max(self.metric_recorder[f'{metric}_Avg'])
-						max_metric_idx = self.metric_recorder[f'{metric}_Avg'].index(max_metric) + 1
+						max_metric_avg = max(self.metric_recorder[avg_key])
+						max_metric_idx_avg = self.metric_recorder[avg_key].index(max_metric_avg) + 1
 						msg[metric].append(metric_result_avg)
-						msg[f'{metric} (Max)'].append(f'{max_metric:.3f} ({max_metric_idx:<3d} epoch)')
+						msg[f'{metric} (Max)'].append(f'{max_metric_avg:.3f} ({max_metric_idx_avg:<3d} epoch)')
 			
 			# In ra bảng tabulate
 			msg = tabulate.tabulate(msg, headers='keys', tablefmt="pipe", floatfmt='.3f', numalign="center", stralign="center", )

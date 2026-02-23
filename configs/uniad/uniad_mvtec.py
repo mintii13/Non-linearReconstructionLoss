@@ -16,7 +16,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 		self.stats_config = dict(
             ci_ratio=90,             # Tỷ lệ khoảng tin cậy (Confidence Interval)
             activation_type='sigmoid', # Loại hàm kích hoạt
-            enabled=True
+            enabled=False
         )
 		self.seed = 42
 		self.size = 256

@@ -14,9 +14,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # Stats Config
         self.stats_config = dict(
-            ci_ratio=90,            
+            ci_ratio=85,            
             activation_type='sigmoid',
-            enabled=True             
+            enabled=False             
         )
         self.seed = 42
         self.size = 256
@@ -35,9 +35,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         self.metrics = [
             'mAUROC_sp_max', 'mAUROC_px',
-            # 'mAP_sp_max', 'mF1_max_sp_max',
-            # 'mAUPRO_px', 
-            # 'mAP_px', 'mF1_max_px',
+            'mAP_sp_max', 'mF1_max_sp_max',
+            'mAUPRO_px', 
+            'mAP_px', 'mF1_max_px',
         ]
 
         # ==> Data
@@ -96,6 +96,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.trainer.name = 'UniADTrainer' 
         self.trainer.logdir_sub = ''
         self.trainer.resume_dir = ''
+        self.trainer.resume_dir = 'icme_checkpoint/mvtec/nosigmoid'
         self.trainer.epoch_full = self.epoch_full
         
         self.trainer.scheduler_kwargs = dict(
