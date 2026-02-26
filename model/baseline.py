@@ -21,8 +21,10 @@ def compute_inv_covariance(model, dataloader, device):
     
     print("Computing Covariance Matrix...")
     with torch.no_grad():
-        for imgs in dataloader:
-            imgs = imgs.to(device)
+        for batch in dataloader:
+            # Lấy tensor ảnh từ dictionary thông qua key 'img'
+            imgs = batch['img'].to(device)
+            
             # Lấy features từ model
             feat_align, feat_rec, _ = model(imgs)
             
@@ -496,12 +498,12 @@ class BaselineWrapper(nn.Module):
     def forward(self, imgs):
         feats_backbone = self.net_backbone(imgs)
         feats_merge = self.net_merge(feats_backbone)
-        # # 1. Permute
-        # feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
-        # # 2. Norm
-        # feats_norm = self.net_norm(feats_norm)
-        # # 3. Permute back
-        # feats_merge = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
+        # 1. Permute
+        feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
+        # 2. Norm
+        feats_norm = self.net_norm(feats_norm)
+        # 3. Permute back
+        feats_merge = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
         feats_norm = feats_merge.detach()
         
         output_dict = self.net_ad(feats_norm)
