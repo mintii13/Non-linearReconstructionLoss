@@ -96,7 +96,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.trainer.name = 'UniADTrainer' 
         self.trainer.logdir_sub = ''
         self.trainer.resume_dir = ''
-        self.trainer.resume_dir = 'icme_checkpoint/mvtec/nosigmoid'
+        self.trainer.resume_dir = 'icme_checkpoint/mvtec/nocalibrate'
         self.trainer.epoch_full = self.epoch_full
         
         self.trainer.scheduler_kwargs = dict(
