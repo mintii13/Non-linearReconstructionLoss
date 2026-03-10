@@ -73,7 +73,7 @@ class UniADTrainer(BaseTrainer):
 		if not hasattr(model_ref, 'stats_config') or not model_ref.stats_config.get('enabled', False):
 			return
 
-		log_msg(self.logger, f"Started calculating K-Value (CI Ratio: {model_ref.stats_config['ci_ratio']})...")
+		log_msg(self.logger, f"Started calculating K-Channel stats (CI Ratio: {model_ref.stats_config['ci_ratio']})...")
 		
 		self.net.eval()
 		train_loader = iter(self.train_loader)
@@ -93,41 +93,43 @@ class UniADTrainer(BaseTrainer):
 				feats_merge = model_ref.net_merge(feats_backbone)
 				# feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
 				# feats_norm = model_ref.net_norm(feats_norm)   
-				# feats_merge = feats_norm.permute(0, 3, 1, 2)
+				# feats_norm = feats_norm.permute(0, 3, 1, 2)
 				all_features.append(feats_merge.detach().cpu())
 
 		# Gộp tất cả features: N x C x H x W
 		full_features = torch.cat(all_features, dim=0)
+		N, C, H, W = full_features.shape
 		
-		all_data_np = full_features.numpy().flatten()
+		# Chuyển về dạng (C, N*H*W) để tính thống kê
+		feature_np = full_features.permute(1, 0, 2, 3).reshape(C, -1).numpy()
+		
 		ci_ratio = model_ref.stats_config['ci_ratio']
 		tail = (100 - ci_ratio) / 2.0
 		
 		# Chọn tử số dựa trên activation type
 		numerator = 8.0 if model_ref.activation_type == 'sigmoid' else 4.8
 		
-		# 1. Tính toán Lower và Upper percentile toàn cục
-		lower = np.percentile(all_data_np, tail)
-		upper = np.percentile(all_data_np, 100 - tail)
-		r = upper - lower
-		
-		# 2. Tính K toàn cục
-		if r > 1e-6:
-			k = numerator / r
-		else:
-			k = 1.0 # Giá trị mặc định nếu Range quá nhỏ
+		k_list = []
+		for c in range(C):
+			channel_data = feature_np[c]
+			lower = np.percentile(channel_data, tail)
+			upper = np.percentile(channel_data, 100 - tail)
+			r = upper - lower
 			
-		# 3. Update buffer của model (k_tensor chỉ là 1 phần tử)
-		# Tương ứng với việc model_ref.k_value chỉ là tensor 1D kích thước 1
-		k_tensor = torch.tensor([k], dtype=torch.float32).cuda()
+			if r > 1e-6:
+				k = numerator / r
+			else:
+				k = 1.0
+			k_list.append(k)
+			
+		# Update buffer của model
+		k_tensor = torch.tensor(k_list, dtype=torch.float32).cuda()
 		model_ref.k_value.copy_(k_tensor)
-		
 		print("\n")
-		log_msg(self.logger, f"Global K-Value calculated. K: {k_tensor.item():.4f}")
-		print(f"Global K-Value calculated.** K: {k_tensor.item():.4f}", flush=True)
-		
+		log_msg(self.logger, f"K-Values calculated. Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}")
+		print(f"K-Values calculated.** Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}", flush=True)
 		# Giải phóng bộ nhớ
-		del all_features, full_features, all_data_np
+		del all_features, full_features, feature_np
 		torch.cuda.empty_cache()
 
 	def reset(self, isTrain=True):

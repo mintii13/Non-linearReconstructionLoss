@@ -334,10 +334,15 @@ class Baseline(nn.Module):
         self.stats_config = stats_config
         self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
         
-        # Xử lý K value
-        k_value = 1.0
+        # Xử lý K values
+        k_list 
+        k_list = stats_config.get('k_values_272', None) if stats_config else None
         
-        k_tensor = torch.tensor([k_value], dtype=torch.float32) # Dùng tensor 1 phần tử 
+        if k_list is None or len(k_list) != self.input_channel_dim:
+            k_tensor = torch.ones(self.input_channel_dim, dtype=torch.float32)
+        else:
+            k_tensor = torch.tensor(k_list, dtype=torch.float32)
+            
         self.k_value = nn.Parameter(k_tensor, requires_grad=False)
         self.upsample = nn.UpsamplingBilinear2d(scale_factor=instrides[0])
         self.feature_norm = nn.LayerNorm(inplanes[0], elementwise_affine=False)
