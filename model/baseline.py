@@ -335,7 +335,6 @@ class Baseline(nn.Module):
         self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
         
         # Xử lý K values
-        k_list 
         k_list = stats_config.get('k_values_272', None) if stats_config else None
         
         if k_list is None or len(k_list) != self.input_channel_dim:
