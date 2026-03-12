@@ -24,7 +24,7 @@ class ChannelMemoryModule(nn.Module):
         self.mem_dim = mem_dim
         self.feature_dim = feature_dim
         self.mem_mask_ratio = mem_mask_ratio
-        self.scale = 1.0 / math.sqrt(feature_dim)
+        self.scale = 10
         
         self.memory = nn.Parameter(torch.randn(mem_dim, feature_dim))
         nn.init.normal_(self.memory, mean=0, std=0.1)
@@ -44,12 +44,7 @@ class ChannelMemoryModule(nn.Module):
         keys = self.key_proj(self.memory)
         values = self.value_proj(self.memory)
         
-        # Áp dụng L2 Norm để biến Dot-Product thành Cosine
-        queries_norm = F.normalize(queries, p=2, dim=-1)
-        keys_norm = F.normalize(keys, p=2, dim=-1)
-        
-        # Cosine Similarity (Khoảng giá trị [-1, 1])
-        attention_scores = torch.mm(queries_norm, keys_norm.t())
+        attention_scores = torch.mm(queries, keys.t())
         
         attention_scores = attention_scores * self.scale
         # ---------------------------------------------------------
@@ -88,7 +83,7 @@ class SpatialMemoryModule(nn.Module):
         self.spatial_dim = height * width
         self.mem_mask_ratio = mem_mask_ratio
         
-        self.scale = 1.0 / math.sqrt(feature_dim)
+        self.scale = 10
         
         # Memory shape: [mem_dim, H, W]
         self.memory = nn.Parameter(torch.randn(mem_dim, height, width))
