@@ -165,7 +165,9 @@ class SpatialMemoryModule(nn.Module):
             mask_indices = torch.randperm(self.mem_dim, device=ssim_similarity.device)[:num_masked]
             ssim_similarity[:, mask_indices] = float('-inf')
 
-        attention_scores = ssim_similarity * self.scale
+        temperature = 10.0 
+        attention_scores = ssim_similarity * temperature 
+        
         att_weight = F.softmax(attention_scores, dim=1)
         
         # 6. Retrieve Values: [B*C, mem_dim] x [mem_dim, H*W] -> [B*C, H*W]
