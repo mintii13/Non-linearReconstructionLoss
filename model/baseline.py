@@ -51,10 +51,7 @@ class ChannelMemoryModule(nn.Module):
         # Cosine Similarity (Khoảng giá trị [-1, 1])
         attention_scores = torch.mm(queries_norm, keys_norm.t())
         
-        # Khi dùng Cosine, ta thường nhân với 1 hằng số Temperature (thay vì self.scale = 1/sqrt(C) quá nhỏ)
-        # Giúp Softmax sắc nét (sharp) hơn. Thường dùng số 10 hoặc 20 cho Memory Bank.
-        temperature = 10.0 
-        attention_scores = attention_scores * temperature
+        attention_scores = attention_scores * self.scale
         # ---------------------------------------------------------
         
         if self.training and self.mem_mask_ratio > 0:
@@ -165,9 +162,7 @@ class SpatialMemoryModule(nn.Module):
             mask_indices = torch.randperm(self.mem_dim, device=ssim_similarity.device)[:num_masked]
             ssim_similarity[:, mask_indices] = float('-inf')
 
-        temperature = 10.0 
-        attention_scores = ssim_similarity * temperature 
-        
+        attention_scores = ssim_similarity * self.scale
         att_weight = F.softmax(attention_scores, dim=1)
         
         # 6. Retrieve Values: [B*C, mem_dim] x [mem_dim, H*W] -> [B*C, H*W]
