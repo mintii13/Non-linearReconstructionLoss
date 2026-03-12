@@ -24,7 +24,7 @@ class ChannelMemoryModule(nn.Module):
         self.mem_dim = mem_dim
         self.feature_dim = feature_dim
         self.mem_mask_ratio = mem_mask_ratio
-        self.scale = 10
+        self.scale = 1.0 / math.sqrt(feature_dim)
         
         self.memory = nn.Parameter(torch.randn(mem_dim, feature_dim))
         nn.init.normal_(self.memory, mean=0, std=0.1)
@@ -88,7 +88,7 @@ class SpatialMemoryModule(nn.Module):
         self.spatial_dim = height * width
         self.mem_mask_ratio = mem_mask_ratio
         
-        self.scale = 10
+        self.scale = 1.0 / math.sqrt(feature_dim)
         
         # Memory shape: [mem_dim, H, W]
         self.memory = nn.Parameter(torch.randn(mem_dim, height, width))
