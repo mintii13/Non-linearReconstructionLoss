@@ -44,14 +44,24 @@ class ChannelMemoryModule(nn.Module):
         keys = self.key_proj(self.memory)
         values = self.value_proj(self.memory)
         
-        attention_scores = torch.mm(queries, keys.t())
+        # Áp dụng L2 Norm để biến Dot-Product thành Cosine
+        queries_norm = F.normalize(queries, p=2, dim=-1)
+        keys_norm = F.normalize(keys, p=2, dim=-1)
+        
+        # Cosine Similarity (Khoảng giá trị [-1, 1])
+        attention_scores = torch.mm(queries_norm, keys_norm.t())
+        
+        # Khi dùng Cosine, ta thường nhân với 1 hằng số Temperature (thay vì self.scale = 1/sqrt(C) quá nhỏ)
+        # Giúp Softmax sắc nét (sharp) hơn. Thường dùng số 10 hoặc 20 cho Memory Bank.
+        temperature = 10.0 
+        attention_scores = attention_scores * temperature
+        # ---------------------------------------------------------
         
         if self.training and self.mem_mask_ratio > 0:
             num_masked = int(self.mem_dim * self.mem_mask_ratio)
             mask_indices = torch.randperm(self.mem_dim, device=attention_scores.device)[:num_masked]
             attention_scores[:, mask_indices] = float('-inf')
 
-        attention_scores = attention_scores * self.scale
         att_weight = F.softmax(attention_scores, dim=1)
         output_flat = torch.mm(att_weight, values)
         
