@@ -46,14 +46,12 @@ class ChannelMemoryModule(nn.Module):
         
         attention_scores = torch.mm(queries, keys.t())
         
-        attention_scores = attention_scores * self.scale
-        # ---------------------------------------------------------
-        
         if self.training and self.mem_mask_ratio > 0:
             num_masked = int(self.mem_dim * self.mem_mask_ratio)
             mask_indices = torch.randperm(self.mem_dim, device=attention_scores.device)[:num_masked]
             attention_scores[:, mask_indices] = float('-inf')
 
+        attention_scores = attention_scores * self.scale
         att_weight = F.softmax(attention_scores, dim=1)
         output_flat = torch.mm(att_weight, values)
         
@@ -71,33 +69,31 @@ class ChannelMemoryModule(nn.Module):
 class SpatialMemoryModule(nn.Module):
     """
     Spatial Memory Module - Spatial pattern processing with SSIM similarity
-    Sử dụng Conv1d cho Query và Conv2d cho Memory để bảo toàn topology 2D
+    Input: (L, B, C) -> Output: (L, B, C)
+    Internal processing treats (B, C) as batch of spatial maps (H, W)
     """
-    def __init__(self, mem_dim, feature_dim, height, width, mem_mask_ratio=0.6, **kwargs):
+    def __init__(self, mem_dim, height, width, mem_mask_ratio=0.6, **kwargs):
         super(SpatialMemoryModule, self).__init__()
         
         self.mem_dim = mem_dim
-        self.feature_dim = feature_dim  # Cần truyền thêm biến này vào __init__
         self.height = height
         self.width = width
         self.spatial_dim = height * width
         self.mem_mask_ratio = mem_mask_ratio
-        
         self.scale = 10
         
         # Memory shape: [mem_dim, H, W]
         self.memory = nn.Parameter(torch.randn(mem_dim, height, width))
         nn.init.normal_(self.memory, mean=0, std=0.1)
         
-        # 1. Dùng Conv1d cho Query (Tương đương Conv 1x1 dọc theo chiều Channel)
-        self.query_proj = nn.Conv1d(in_channels=feature_dim, out_channels=feature_dim, kernel_size=1, bias=False)
-        
-        # 2. Dùng Conv2d cho Memory (Giữ nguyên cấu trúc 2D HxW của prototype, dùng kernel 3x3 để bắt đặc trưng không gian)
-        self.key_proj = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
-        self.value_proj = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+        # Projections work on flattened spatial vectors (H*W)
+        self.query_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
+        self.key_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
+        self.value_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
 
     def compute_ssim_similarity(self, query_patterns, memory_patterns):
-        # [Giữ nguyên code hàm này của bạn...]
+        # query_patterns: [N_samples, H, W] (where N_samples = B*C)
+        # memory_patterns: [mem_dim, H, W]
         N_patterns, H, W = query_patterns.shape
         mem_dim = memory_patterns.shape[0]
         
@@ -127,29 +123,31 @@ class SpatialMemoryModule(nn.Module):
         return ssim
 
     def forward(self, input_tokens):
-        # input_tokens shape: [L, B, C]
+        # input_tokens shape: [L, B, C] where L = H*W
         L, batch_size, feature_dim = input_tokens.shape
         H, W = self.height, self.width
         
-        # --- 1. XỬ LÝ QUERY BẰNG CONV1D ---
-        # Chuyển shape thành [B, C, L] để đưa vào Conv1d
+        # --- FIX: Permute to process spatial maps properly ---
+        # We want to treat each Channel of each Batch as a spatial map (H, W).
+        # Target shape for projection: [B * C, H*W]
+        
+        # 1. Permute to [B, C, L]
         input_permuted = input_tokens.permute(1, 2, 0).contiguous() 
         
-        # Project qua Conv1d: [B, C, L] -> [B, C, L]
-        queries = self.query_proj(input_permuted)
+        # 2. Reshape to [B * C, H*W] (Flatten spatial)
+        input_flat = input_permuted.view(batch_size * feature_dim, H * W)
         
-        # Reshape về dạng không gian 2D để tính SSIM: [B*C, H, W]
-        queries_spatial = queries.view(batch_size * feature_dim, H, W)
+        # 3. Project to Queries
+        queries_flat = self.query_proj(input_flat)
+        queries_spatial = queries_flat.view(batch_size * feature_dim, H, W)
         
-        # --- 2. XỬ LÝ MEMORY BẰNG CONV2D ---
-        # Thêm chiều channel ảo (C=1) cho memory: [mem_dim, 1, H, W]
-        memory_expanded = self.memory.unsqueeze(1)
+        # 4. Prepare Memory Keys/Values
+        memory_flat = self.memory.view(self.mem_dim, H * W)
+        keys_flat = self.key_proj(memory_flat)
+        values_flat = self.value_proj(memory_flat)
+        keys_spatial = keys_flat.view(self.mem_dim, H, W)
         
-        # Project qua Conv2d và bỏ chiều channel đi: -> [mem_dim, H, W]
-        keys_spatial = self.key_proj(memory_expanded).squeeze(1)
-        values_spatial = self.value_proj(memory_expanded).squeeze(1)
-        
-        # --- 3. TÍNH SSIM VÀ ATTENTION ---
+        # 5. Compute SSIM
         ssim_similarity = self.compute_ssim_similarity(queries_spatial, keys_spatial)
         
         if self.training and self.mem_mask_ratio > 0:
@@ -157,19 +155,17 @@ class SpatialMemoryModule(nn.Module):
             mask_indices = torch.randperm(self.mem_dim, device=ssim_similarity.device)[:num_masked]
             ssim_similarity[:, mask_indices] = float('-inf')
 
-        # Áp dụng Temperature Scaling
         attention_scores = ssim_similarity * self.scale
         att_weight = F.softmax(attention_scores, dim=1)
         
-        # --- 4. TÁI TẠO OUTPUT ---
-        # Đưa values về dạng phẳng [mem_dim, H*W] để nhân ma trận
-        values_flat = values_spatial.view(self.mem_dim, H * W)
-        
-        # Nhân trọng số: [B*C, mem_dim] x [mem_dim, H*W] -> [B*C, H*W]
+        # 6. Retrieve Values: [B*C, mem_dim] x [mem_dim, H*W] -> [B*C, H*W]
         output_flat = torch.mm(att_weight, values_flat)
         
-        # Trả về shape gốc [L, B, C]
+        # 7. Reshape and Permute back to [L, B, C]
+        # [B*C, H*W] -> [B, C, L]
         output_reshaped = output_flat.view(batch_size, feature_dim, L)
+        
+        # [B, C, L] -> [L, B, C]
         output_tokens = output_reshaped.permute(2, 0, 1).contiguous()
         
         return {
@@ -280,7 +276,6 @@ class Baseline(nn.Module):
         if self.use_spatial_memory:
             self.spatial_memory_module = SpatialMemoryModule(
                 mem_dim=kwargs.get('spatial_memory_size', 256),
-                feature_dim=self.hidden_dim,
                 height=feature_size[0], width=feature_size[1],
                 mem_mask_ratio=self.mem_mask_ratio
             )
