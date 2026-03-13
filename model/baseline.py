@@ -368,9 +368,9 @@ class Baseline(nn.Module):
     
     def forward(self, feature_align):
         # feature_align: B x C X H x W
-        feature_tokens = rearrange(feature_align, "b c h w -> (h w) b c")
+        feature_norm = rearrange(feature_align, "b c h w -> (h w) b c")
         # Feature Norm
-        feature_norm = self.feature_norm(feature_tokens)
+        # feature_norm = self.feature_norm(feature_tokens)
         
         if self.training and self.feature_jitter:
             feature_tokens = self.add_jitter(feature_norm, self.feature_jitter.scale, self.feature_jitter.prob)
