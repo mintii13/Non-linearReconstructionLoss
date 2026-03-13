@@ -85,7 +85,7 @@ class SpatialMemoryModule(nn.Module):
         self.width = width
         self.spatial_dim = height * width
         self.mem_mask_ratio = mem_mask_ratio
-        self.scale = 10
+        self.scale = 20
         
         # Memory shape: [mem_dim, H, W]
         self.memory = nn.Parameter(torch.randn(mem_dim, height, width))
