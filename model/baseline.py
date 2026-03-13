@@ -24,7 +24,7 @@ class ChannelMemoryModule(nn.Module):
         self.mem_dim = mem_dim
         self.feature_dim = feature_dim
         self.mem_mask_ratio = mem_mask_ratio
-        self.scale = 10
+        self.scale = 20
         
         self.memory = nn.Parameter(torch.randn(mem_dim, feature_dim))
         nn.init.normal_(self.memory, mean=0, std=0.1)
@@ -50,14 +50,13 @@ class ChannelMemoryModule(nn.Module):
         
         # Cosine Similarity (Khoảng giá trị [-1, 1])
         attention_scores = torch.mm(queries_norm, keys_norm.t())
-        attention_scores = attention_scores * self.scale
-        # ---------------------------------------------------------
         
         if self.training and self.mem_mask_ratio > 0:
             num_masked = int(self.mem_dim * self.mem_mask_ratio)
             mask_indices = torch.randperm(self.mem_dim, device=attention_scores.device)[:num_masked]
             attention_scores[:, mask_indices] = float('-inf')
 
+        attention_scores = attention_scores * self.scale
         att_weight = F.softmax(attention_scores, dim=1)
         output_flat = torch.mm(att_weight, values)
         
@@ -86,7 +85,7 @@ class SpatialMemoryModule(nn.Module):
         self.width = width
         self.spatial_dim = height * width
         self.mem_mask_ratio = mem_mask_ratio
-        self.scale = 1.0
+        self.scale = 10
         
         # Memory shape: [mem_dim, H, W]
         self.memory = nn.Parameter(torch.randn(mem_dim, height, width))
