@@ -339,7 +339,7 @@ class Baseline(nn.Module):
         self.stats_config = stats_config
         self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
         
-        # Xử lý K values
+        # K values
         k_list = stats_config.get('k_values_272', None) if stats_config else None
         
         if k_list is None or len(k_list) != self.input_channel_dim:
@@ -348,6 +348,18 @@ class Baseline(nn.Module):
             k_tensor = torch.tensor(k_list, dtype=torch.float32)
             
         self.k_value = nn.Parameter(k_tensor, requires_grad=False)
+
+        # ================= Diagnostic Buffers =================
+        # lower_bound, upper_bound: per-channel normal range từ calibration
+        # dùng để tính delta_normal / delta_outlier trong trainer
+        self.lower_bound = nn.Parameter(
+            torch.zeros(self.input_channel_dim, dtype=torch.float32), requires_grad=False
+        )
+        self.upper_bound = nn.Parameter(
+            torch.ones(self.input_channel_dim, dtype=torch.float32), requires_grad=False
+        )
+        # =======================================================
+
         self.upsample = nn.UpsamplingBilinear2d(scale_factor=instrides[0])
         self.feature_norm = nn.LayerNorm(inplanes[0], elementwise_affine=False)
     
@@ -385,6 +397,7 @@ class Baseline(nn.Module):
         
         pos_embed = self.pos_embed(feature_tokens)
         encoded_tokens = self.encoder(feature_tokens, pos=pos_embed)
+        pre_memory_tokens = encoded_tokens  # [L, B, C] - before any memory retrieval
         # ================= Memory Retrieval & Fusion =================
         memory_features_list = []
         channel_result = None
@@ -434,7 +447,7 @@ class Baseline(nn.Module):
                 memory_features = self.fusion_layer(combined_features)
         # ==================================================================
 
-
+        post_fusion_tokens = memory_features  # [L, B, C] - after fusion, before decoder
 
         decoded_tokens = self.decoder(memory_features, memory_features, pos=pos_embed)
         
@@ -448,25 +461,40 @@ class Baseline(nn.Module):
             # Lấy hàm activation (Sigmoid)
             activation_fn = self._get_activation_fn_from_config(self.activation_type)
             
-            # Áp dụng K và Sigmoid cho Reconstruction
-            feature_rec_tokens = activation_fn(feature_rec_tokens * k_value)
+            # Pre-sigmoid values (trước khi qua activation) - dùng cho diagnostic
+            pre_sigmoid_rec   = feature_rec_tokens   # [L, B, C_orig]
+            pre_sigmoid_orig  = feature_norm         # [L, B, C_orig]
+
+            feature_rec_tokens = activation_fn(pre_sigmoid_rec * k_value)
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
             
-            feature_align = activation_fn(feature_norm * k_value)
-            feature_align = rearrange(feature_align, "(h w) b c -> b c h w", h=self.feature_size[0])
-            
+            feature_align_act = activation_fn(pre_sigmoid_orig * k_value)
+            feature_align_out = rearrange(feature_align_act, "(h w) b c -> b c h w", h=self.feature_size[0])
+
+            # Reshape pre-sigmoid to [B, C, H, W] cho trainer dễ dùng
+            pre_sigmoid_rec_map  = rearrange(pre_sigmoid_rec,  "(h w) b c -> b c h w", h=self.feature_size[0])
+            pre_sigmoid_orig_map = rearrange(pre_sigmoid_orig, "(h w) b c -> b c h w", h=self.feature_size[0])
         else:
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
-            feature_align = rearrange(feature_norm, "(h w) b c -> b c h w", h=self.feature_size[0])
+            feature_align_out = rearrange(feature_norm, "(h w) b c -> b c h w", h=self.feature_size[0])
+            pre_sigmoid_rec_map  = feature_rec
+            pre_sigmoid_orig_map = feature_align_out
         
-        pred = torch.sqrt(torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True))
+        pred = torch.sqrt(torch.sum((feature_rec - feature_align_out) ** 2, dim=1, keepdim=True))
         pred = self.upsample(pred)
         
         # Trả về output_dict như yêu cầu của class Baseline
         output_dict = {
             "feature_rec": feature_rec,
-            "feature_align": feature_align,
+            "feature_align": feature_align_out,
             "pred": pred,
+            # ---- diagnostic outputs ----
+            "pre_sigmoid_rec":    pre_sigmoid_rec_map,   # [B, C, H, W] or None
+            "pre_sigmoid_orig":   pre_sigmoid_orig_map,  # [B, C, H, W] or None
+            "pre_memory_tokens":  pre_memory_tokens,     # [L, B, hidden_dim]
+            "channel_result":     channel_result,        # dict with att_weight, or None
+            "spatial_result":     spatial_result,        # dict with att_weight, or None
+            "post_fusion_tokens": post_fusion_tokens,    # [L, B, hidden_dim]
         }
         return output_dict
 
@@ -701,6 +729,14 @@ class BaselineWrapper(nn.Module):
     def k_value(self):
         return self.net_ad.k_value
 
+    @property
+    def lower_bound(self):
+        return self.net_ad.lower_bound
+
+    @property
+    def upper_bound(self):
+        return self.net_ad.upper_bound
+
     def freeze_layer(self, module):
         module.eval()
         for param in module.parameters():
@@ -726,7 +762,8 @@ class BaselineWrapper(nn.Module):
         feature_rec = output_dict['feature_rec']
         pred = output_dict['pred']
         
-        return feature_align, feature_rec, pred
+        # Trả về tuple chính + full dict cho diagnostic
+        return feature_align, feature_rec, pred, output_dict
 
 # ==========================================
 # 5. Register Module
