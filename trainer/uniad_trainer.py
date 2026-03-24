@@ -158,7 +158,7 @@ class UniADTrainer(BaseTrainer):
 		with self.amp_autocast():
 			self.forward()
 			diff_sq = (self.feats_t - self.feats_s) ** 2
-            loss_mse = diff_sq.mean()
+			loss_mse = diff_sq.mean()
 		self.backward_term(loss_mse, self.optim)
 		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
 	
