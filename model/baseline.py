@@ -442,7 +442,7 @@ class Baseline(nn.Module):
                 gate = self.gate_layer(combined)
                 memory_features = gate * channel_features + (1 - gate) * spatial_features
             else:
-                 # fallback
+                # fallback
                 combined_features = torch.cat([channel_features, spatial_features], dim=-1)
                 memory_features = self.fusion_layer(combined_features)
         # ==================================================================
@@ -453,7 +453,8 @@ class Baseline(nn.Module):
         
         feature_rec_tokens = self.output_proj(decoded_tokens)
         is_stats_enabled = self.stats_config is not None and self.stats_config.get('enabled', False)
-
+        pre_sigmoid_rec  = feature_rec_tokens
+        pre_sigmoid_orig = feature_norm
         if is_stats_enabled:
             # Lấy K values
             k_value = self.k_value.to(feature_align.device)
@@ -461,9 +462,8 @@ class Baseline(nn.Module):
             # Lấy hàm activation (Sigmoid)
             activation_fn = self._get_activation_fn_from_config(self.activation_type)
             
-            # Pre-sigmoid values (trước khi qua activation) - dùng cho diagnostic
-            pre_sigmoid_rec   = feature_rec_tokens   # [L, B, C_orig]
-            pre_sigmoid_orig  = feature_norm         # [L, B, C_orig]
+            pre_sigmoid_rec  = feature_rec_tokens   # [L, B, C]
+            pre_sigmoid_orig = feature_norm         # [L, B, C]
 
             feature_rec_tokens = activation_fn(pre_sigmoid_rec * k_value)
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
@@ -471,14 +471,19 @@ class Baseline(nn.Module):
             feature_align_act = activation_fn(pre_sigmoid_orig * k_value)
             feature_align_out = rearrange(feature_align_act, "(h w) b c -> b c h w", h=self.feature_size[0])
 
-            # Reshape pre-sigmoid to [B, C, H, W] cho trainer dễ dùng
             pre_sigmoid_rec_map  = rearrange(pre_sigmoid_rec,  "(h w) b c -> b c h w", h=self.feature_size[0])
             pre_sigmoid_orig_map = rearrange(pre_sigmoid_orig, "(h w) b c -> b c h w", h=self.feature_size[0])
+
         else:
+            # Đặt tên nhất quán — pre_sigmoid ở đây là raw feature trước MSE
+            pre_sigmoid_rec  = feature_rec_tokens   # [L, B, C]
+            pre_sigmoid_orig = feature_norm         # [L, B, C]
+
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
             feature_align_out = rearrange(feature_norm, "(h w) b c -> b c h w", h=self.feature_size[0])
-            pre_sigmoid_rec_map  = feature_rec
-            pre_sigmoid_orig_map = feature_align_out
+
+            pre_sigmoid_rec_map  = feature_rec        # [B, C, H, W]
+            pre_sigmoid_orig_map = feature_align_out  # [B, C, H, W]
         
         pred = torch.sqrt(torch.sum((feature_rec - feature_align_out) ** 2, dim=1, keepdim=True))
         pred = self.upsample(pred)
