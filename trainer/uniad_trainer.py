@@ -157,15 +157,8 @@ class UniADTrainer(BaseTrainer):
 			self.imgs, _ = self.mixup_fn(self.imgs, torch.ones(self.imgs.shape[0], device=self.imgs.device))
 		with self.amp_autocast():
 			self.forward()
-			if hasattr(self.net, 'module'): weights = self.net.module.loss_weights
-			else: weights = self.net.loss_weights
-			# Reshape (C) -> (1, C, 1, 1) để nhân broadcasting
-			weights = weights.view(1, -1, 1, 1)
-			# 2. Tính Weighted MSE thủ công
-			# (Recon - Target)^2 * Weight
 			diff_sq = (self.feats_t - self.feats_s) ** 2
-			weighted_diff = diff_sq * weights
-			loss_mse = weighted_diff.mean() # Trung bình hóa
+            loss_mse = diff_sq.mean()
 		self.backward_term(loss_mse, self.optim)
 		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
 	
@@ -195,15 +188,6 @@ class UniADTrainer(BaseTrainer):
 		self.reset(isTrain=True)
 		self.train_loader.sampler.set_epoch(int(self.epoch)) if self.cfg.dist else None
 		if self.epoch == 0 and self.iter == 0:
-			self.calculate_loss_weights()
-			
-			# Broadcast cho các GPU khác nếu dùng DDP
-			if self.cfg.dist:
-				if hasattr(self.net, 'module'):
-					torch.distributed.broadcast(self.net.module.loss_weights, src=0)
-				else:
-					torch.distributed.broadcast(self.net.loss_weights, src=0)
-			
 			self.net.train()
 		train_length = self.cfg.data.train_size
 		train_loader = iter(self.train_loader)
