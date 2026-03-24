@@ -495,6 +495,7 @@ class Baseline(nn.Module):
             "channel_result":     channel_result,        # dict with att_weight, or None
             "spatial_result":     spatial_result,        # dict with att_weight, or None
             "post_fusion_tokens": post_fusion_tokens,    # [L, B, hidden_dim]
+            "pre_sigmoid_rec_tokens_for_grad": pre_sigmoid_rec,
         }
         return output_dict
 

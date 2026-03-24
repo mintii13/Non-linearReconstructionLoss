@@ -134,10 +134,54 @@ class UniADTrainer(BaseTrainer):
 
 		print("\n")
 		log_msg(self.logger, f"K-Values calculated. Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}")
+		print(f"K-Values calculated.** Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}", flush=True)
 		log_msg(self.logger, f"Normal range (mean across channels): [{lower_tensor.mean():.4f}, {upper_tensor.mean():.4f}]")
+		print(f"Normal range (mean across channels): [{lower_tensor.mean():.4f}, {upper_tensor.mean():.4f}]", flush=True)
 
 		del all_features, full_features, feature_np
 		torch.cuda.empty_cache()
+
+	@torch.no_grad()
+	def _accumulate_grad_diagnostics(self, grad_tokens):
+		# grad_tokens: [L, B, C] — gradient của pre_sigmoid_rec tại mỗi vị trí
+		# pre_sigmoid_orig_map: [B, C, H, W] — dùng để build normal/outlier mask
+		
+		pre_orig_map = self.output_dict.get('pre_sigmoid_orig')
+		if pre_orig_map is None:
+			return
+
+		model_ref = self._get_model_ref()
+		lower = model_ref.lower_bound.detach()[None, :, None, None]
+		upper = model_ref.upper_bound.detach()[None, :, None, None]
+
+		# Build mask trên pre_sigmoid_orig [B, C, H, W]
+		normal_mask  = (pre_orig_map >= lower) & (pre_orig_map <= upper)  # [B, C, H, W]
+		outlier_mask = ~normal_mask
+
+		# Convert grad từ [L, B, C] sang [B, C, H, W] để align với mask
+		H, W = self.output_dict['pre_sigmoid_orig'].shape[2], self.output_dict['pre_sigmoid_orig'].shape[3]
+		L, B, C = grad_tokens.shape
+		grad_map = grad_tokens.permute(1, 2, 0).reshape(B, C, H, W)  # [B, C, H, W]
+
+		# Gradient magnitude (L2 norm theo channel dim, rồi mean)
+		grad_magnitude = grad_map.abs()  # element-wise absolute gradient
+
+		grad_normal_mean  = grad_magnitude[normal_mask].mean().item()  if normal_mask.any()  else 0.0
+		grad_outlier_mean = grad_magnitude[outlier_mask].mean().item() if outlier_mask.any() else 0.0
+
+		# Ratio: gradient normal / gradient outlier
+		# Kỳ vọng: ratio >> 1 → gradient chảy mạnh về normal, yếu về outlier
+		ratio = grad_normal_mean / (grad_outlier_mean + 1e-9)
+
+		key_map = {
+			'Gradient/grad_normal_mean':  grad_normal_mean,
+			'Gradient/grad_outlier_mean': grad_outlier_mean,
+			'Gradient/grad_normal_outlier_ratio': ratio,
+		}
+		for k, v in key_map.items():
+			if k not in self._diag_accum:
+				self._diag_accum[k] = 0.0
+			self._diag_accum[k] += v
 
 	# ============================================================
 	# _compute_diagnostic_metrics: tính tất cả diagnostic metrics
@@ -281,7 +325,18 @@ class UniADTrainer(BaseTrainer):
 		with self.amp_autocast():
 			self.forward()
 			loss_mse = self.loss_terms['pixel'](self.feats_t, self.feats_s)
+		# ---- Register gradient hook TRƯỚC backward ----
+		grad_store = {}
+		pre_sig_tokens = self.output_dict.get('pre_sigmoid_rec_tokens_for_grad')
+		if self.master and pre_sig_tokens is not None and pre_sig_tokens.requires_grad:
+			scaler_scale = self.loss_scaler.state_dict().get('scale', 1.0) \
+						if self.loss_scaler else 1.0
+			def save_grad(grad):
+				grad_store['grad'] = (grad / scaler_scale).detach()
+			pre_sig_tokens.register_hook(save_grad)
 		self.backward_term(loss_mse, self.optim)
+		if self.master and 'grad' in grad_store:
+			self._accumulate_grad_diagnostics(grad_store['grad'])
 		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
 
 		# Accumulate diagnostic metrics (chỉ trên master để tiết kiệm compute)
