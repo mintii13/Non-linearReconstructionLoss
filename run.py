@@ -5,6 +5,8 @@ from util.util import run_pre, init_checkpoint
 from trainer import get_trainer
 import warnings
 import torch
+import random
+import numpy as np
 warnings.filterwarnings("ignore")
 
 def seed_everything(seed=42):
