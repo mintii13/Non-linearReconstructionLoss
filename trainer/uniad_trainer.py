@@ -34,6 +34,7 @@ from . import TRAINER
 from util.vis import vis_rgb_gt_amp
 import wandb
 import setproctitle
+from einops import rearrange
 setproctitle.setproctitle("Minh Tri is training...")
 
 
@@ -143,40 +144,35 @@ class UniADTrainer(BaseTrainer):
 
 	@torch.no_grad()
 	def _accumulate_grad_diagnostics(self, grad_tokens):
-		# grad_tokens: [L, B, C] — gradient của pre_sigmoid_rec tại mỗi vị trí
-		# pre_sigmoid_orig_map: [B, C, H, W] — dùng để build normal/outlier mask
-		
-		pre_orig_map = self.output_dict.get('pre_sigmoid_orig')
-		if pre_orig_map is None:
+		pre_rec_map = self.output_dict.get('pre_sigmoid_rec')  # [B, C, H, W]
+		if pre_rec_map is None:
 			return
 
 		model_ref = self._get_model_ref()
 		lower = model_ref.lower_bound.detach()[None, :, None, None]
 		upper = model_ref.upper_bound.detach()[None, :, None, None]
 
-		# Build mask trên pre_sigmoid_orig [B, C, H, W]
-		normal_mask  = (pre_orig_map >= lower) & (pre_orig_map <= upper)  # [B, C, H, W]
+		normal_mask  = (pre_rec_map >= lower) & (pre_rec_map <= upper)
 		outlier_mask = ~normal_mask
 
-		# Convert grad từ [L, B, C] sang [B, C, H, W] để align với mask
-		H, W = self.output_dict['pre_sigmoid_orig'].shape[2], self.output_dict['pre_sigmoid_orig'].shape[3]
+		H, W = pre_rec_map.shape[2], pre_rec_map.shape[3]
 		L, B, C = grad_tokens.shape
-		grad_map = grad_tokens.permute(1, 2, 0).reshape(B, C, H, W)  # [B, C, H, W]
 
-		# Gradient magnitude (L2 norm theo channel dim, rồi mean)
-		grad_magnitude = grad_map.abs()  # element-wise absolute gradient
+		# Dùng rearrange để consistent với model forward
+		grad_map = rearrange(grad_tokens, "(h w) b c -> b c h w", h=H, w=W)
+
+		grad_magnitude = grad_map.abs()
 
 		grad_normal_mean  = grad_magnitude[normal_mask].mean().item()  if normal_mask.any()  else 0.0
 		grad_outlier_mean = grad_magnitude[outlier_mask].mean().item() if outlier_mask.any() else 0.0
-
-		# Ratio: gradient normal / gradient outlier
-		# Kỳ vọng: ratio >> 1 → gradient chảy mạnh về normal, yếu về outlier
 		ratio = grad_normal_mean / (grad_outlier_mean + 1e-9)
+		normal_ratio_rec  = normal_mask.float().mean().item()
 
 		key_map = {
-			'Gradient/grad_normal_mean':  grad_normal_mean,
-			'Gradient/grad_outlier_mean': grad_outlier_mean,
+			'Gradient/grad_normal_mean':          grad_normal_mean,
+			'Gradient/grad_outlier_mean':         grad_outlier_mean,
 			'Gradient/grad_normal_outlier_ratio': ratio,
+			'Gradient/rec_normal_ratio':          normal_ratio_rec,
 		}
 		for k, v in key_map.items():
 			if k not in self._diag_accum:
