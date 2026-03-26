@@ -106,7 +106,7 @@ class UniADTrainer(BaseTrainer):
 		
 		# Normalize & Clip (Vẫn cần để giữ ổn định)
 		weights = weights / weights.mean()
-		# weights = torch.clamp(weights, min=0.8, max=2.0)
+		weights = torch.clamp(weights, min=0.1, max=10.0)
 		# =========================
 		
 		device = next(model_ref.parameters()).device 
