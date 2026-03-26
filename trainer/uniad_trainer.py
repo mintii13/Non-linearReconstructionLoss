@@ -274,6 +274,64 @@ class UniADTrainer(BaseTrainer):
 			max_entropy = torch.log(torch.tensor(float(mem_dim_sp), device=att_w.device))
 			metrics['Memory/active_slot_ratio_spatial'] = (entropy_sp / max_entropy).item()
 
+		# ---- 6. Variance của post_fusion_tokens ----
+		if post_fuse is not None:
+			# post_fuse: [L, B, hidden_dim]
+			# Tính variance theo batch dimension để xem output có diverse không
+			# Nếu variance thấp → output gần constant → decoder bypass memory
+			
+			# Variance theo spatial+batch dimension, giữ hidden dim
+			post_fuse_flat = post_fuse.reshape(-1, post_fuse.shape[-1])  # [L*B, hidden_dim]
+			
+			# Variance trung bình trên mỗi hidden dimension, rồi mean over dims
+			var_per_dim = post_fuse_flat.var(dim=0)  # [hidden_dim]
+			metrics['Memory/post_fusion_variance_mean'] = var_per_dim.mean().item()
+			metrics['Memory/post_fusion_variance_min']  = var_per_dim.min().item()
+
+		# ---- 7. Cosine similarity giữa các memory slots ----
+		# Nếu slots giống nhau → memory collapse → decoder nhận cùng 1 value
+		# Nếu slots đa dạng   → memory có khả năng encode nhiều pattern khác nhau
+		if channel_result is not None:
+			mem_slots = channel_result['memory']  # [mem_dim, feature_dim]
+			mem_norm  = F.normalize(mem_slots, p=2, dim=-1)  # [mem_dim, feature_dim]
+			
+			# Tính pairwise cosine similarity matrix [mem_dim, mem_dim]
+			cos_matrix = torch.mm(mem_norm, mem_norm.t())
+			
+			# Lấy upper triangle (loại bỏ diagonal = 1)
+			mask_upper = torch.triu(torch.ones_like(cos_matrix, dtype=torch.bool), diagonal=1)
+			pairwise_cos = cos_matrix[mask_upper]
+			
+			metrics['Memory/channel_slot_cos_mean'] = pairwise_cos.mean().item()
+			metrics['Memory/channel_slot_cos_max']  = pairwise_cos.max().item()
+			# Nếu mean gần 0, max << 1 → slots đa dạng → memory không collapse
+
+		if spatial_result is not None:
+			mem_slots = spatial_result['memory']  # [mem_dim, H, W]
+			mem_dim_s = mem_slots.shape[0]
+			mem_flat  = mem_slots.view(mem_dim_s, -1)  # [mem_dim, H*W]
+			mem_norm  = F.normalize(mem_flat, p=2, dim=-1)
+			
+			cos_matrix = torch.mm(mem_norm, mem_norm.t())
+			mask_upper = torch.triu(torch.ones_like(cos_matrix, dtype=torch.bool), diagonal=1)
+			pairwise_cos = cos_matrix[mask_upper]
+			
+			metrics['Memory/spatial_slot_cos_mean'] = pairwise_cos.mean().item()
+			metrics['Memory/spatial_slot_cos_max']  = pairwise_cos.max().item()
+
+		if channel_result is not None:
+			att_w = channel_result['att_weight']  # [L*B, mem_dim]
+			# Variance của attention weights theo sample dimension
+			# Cao → mỗi input attend vào slots khác nhau → memory đang dùng input info
+			# Thấp → mọi input attend giống nhau → memory bypass input
+			att_var = att_w.var(dim=0).mean().item()  # variance across samples, mean across slots
+			metrics['Memory/channel_att_weight_variance'] = att_var
+
+		if spatial_result is not None:
+			att_w = spatial_result['att_weight']  # [B*C, mem_dim]
+			att_var = att_w.var(dim=0).mean().item()
+			metrics['Memory/spatial_att_weight_variance'] = att_var
+
 		return metrics
 
 	# ============================================================
