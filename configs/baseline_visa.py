@@ -80,7 +80,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.model.name = 'baseline' 
         self.model.kwargs = dict(
             pretrained=False, 
-            checkpoint_path='runs/decorrelation_checkpoint/visa/ckpt.pth', 
+            checkpoint_path='runs/decorrelation_checkpoint/visa/baseline/ckpt.pth', 
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
@@ -128,7 +128,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         # === WandB ===
         self.wandb = Namespace()
-        self.wandb.enabled = True
+        self.wandb.enabled = False
         self.wandb.project = "Ader_VisA_NewIdea" 
         self.wandb.entity = None 
         self.wandb.name = 'TestMaha_BaselineLnorm_500_lr0.0001_512_seede42'

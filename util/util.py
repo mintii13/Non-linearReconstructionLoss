@@ -68,8 +68,8 @@ def init_checkpoint(cfg):
         else:
             cfg.model.kwargs['checkpoint_path'] = '{}/{}'.format(cfg.logdir, checkpoint_path.split('/')[-1])
         state_dict = torch.load(cfg.model.kwargs['checkpoint_path'], map_location='cpu', weights_only=False)
-        cfg.trainer.iter, cfg.trainer.epoch = state_dict['iter'], state_dict['epoch']
-        cfg.trainer.metric_recorder = state_dict['metric_recorder']
+        cfg.trainer.iter, cfg.trainer.epoch = state_dict.get('iter', 0), state_dict.get('epoch', 0)
+        cfg.trainer.metric_recorder = state_dict.get('metric_recorder', 0)
     else:
         if cfg.master:
             logdir_sub = cfg.trainer.logdir_sub if cfg.trainer.logdir_sub != '' else time.strftime("%Y%m%d-%H%M%S")

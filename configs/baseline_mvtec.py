@@ -18,7 +18,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             activation_type='sigmoid',
             enabled=False        
         )
-        self.seed = 43
+        self.seed = 42
         self.size = 256
         
         # === Trainer Settings ===
@@ -80,12 +80,12 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.model.name = 'baseline' 
         self.model.kwargs = dict(
             pretrained=False, 
-            checkpoint_path='runs/decorrelation_checkpoint/baseline/ckpt.pth', 
+            checkpoint_path='runs/decorrelation_checkpoint/mvtec/baseline/ckpt.pth', 
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
             stats_config=self.stats_config,
-            dist_metric='maha'
+            # dist_metric='maha'
         )
 
         # Evaluator, Optimizer
@@ -129,7 +129,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         # === WandB ===
         self.wandb = Namespace()
-        self.wandb.enabled = True
+        self.wandb.enabled = False
         self.wandb.project = "Ader_MVTec_NewIdea"
         self.wandb.entity = None 
         self.wandb.name = 'TestMaha_Baseline_500_lr0.0001_512_seede42'

@@ -32,7 +32,6 @@ from ._base_trainer import BaseTrainer
 from . import TRAINER
 from util.vis import vis_rgb_gt_amp
 import wandb
-from model.baseline import compute_inv_covariance
 import setproctitle
 setproctitle.setproctitle("Minh Tri is training...")
 @TRAINER.register_module
@@ -249,30 +248,9 @@ class UniADTrainer(BaseTrainer):
 				if self.cfg.dist and self.dist_BN != '':
 					distribute_bn(self.net, self.world_size, self.dist_BN)
 				self.optim.sync_lookahead() if hasattr(self.optim, 'sync_lookahead') else None
-				do_test = False
 				if self.epoch == self.cfg.trainer.test_start_epoch:
-					do_test = True
+					self.test()
 				elif self.epoch > self.cfg.trainer.test_start_epoch and self.epoch % self.cfg.trainer.test_per_epoch == 0:
-					do_test = True
-
-				if do_test:
-					# === KIỂM TRA METRIC CỦA MODEL ===
-					# Lấy dist_metric từ model ra để check
-					current_model = self.net.module if hasattr(self.net, 'module') else self.net
-					# Truy cập vào net_ad để lấy dist_metric
-					metric_mode = getattr(current_model.net_ad, 'dist_metric', 'maha')
-
-					# CHỈ TÍNH COVARIANCE NẾU DÙNG MAHALANOBIS
-					if metric_mode == 'maha':
-						if self.master:
-							print(f"\n[Epoch {self.epoch}] Metric is '{metric_mode}'. Computing Mahalanobis Statistics...")
-						
-						compute_inv_covariance(self.net, self.train_loader, self.imgs.device)
-					else:
-						if self.master:
-							print(f"\n[Epoch {self.epoch}] Metric is '{metric_mode}'. Skipping Covariance calculation.")
-
-					# Chạy test
 					self.test()
 				else:
 					self.test_ghost()
@@ -301,23 +279,6 @@ class UniADTrainer(BaseTrainer):
 				shutil.rmtree(self.tmp_dir)
 			os.makedirs(self.tmp_dir, exist_ok=True)
 		self.reset(isTrain=False)
-		# Lấy dist_metric từ model ra để check
-		current_model = self.net.module if hasattr(self.net, 'module') else self.net
-		# Truy cập vào net_ad để lấy dist_metric
-		metric_mode = getattr(current_model.net_ad, 'dist_metric', 'maha')
-
-		# Lấy device trực tiếp từ model
-		device = next(current_model.parameters()).device
-
-		# CHỈ TÍNH COVARIANCE NẾU DÙNG MAHALANOBIS
-		if metric_mode == 'maha':
-			if self.master:
-				print(f"\n[Epoch {self.epoch}] Metric is '{metric_mode}'. Computing Mahalanobis Statistics...")
-			
-			compute_inv_covariance(self.net, self.train_loader, device)
-		else:
-			if self.master:
-				print(f"\n[Epoch {self.epoch}] Metric is '{metric_mode}'. Skipping Covariance calculation.")
 		imgs_masks, anomaly_maps, cls_names, anomalys = [], [], [], []
 		batch_idx = 0
 		test_length = self.cfg.data.test_size
