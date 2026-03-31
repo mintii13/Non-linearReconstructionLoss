@@ -24,8 +24,8 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # === Trainer Settings ===
         self.epoch_full = 500
         self.warmup_epochs = 0
-        self.test_per_epoch = 50
-        self.test_start_epoch = 50
+        self.test_per_epoch = 100
+        self.test_start_epoch = 100
         
         self.batch_train = 8
         self.batch_test_per = 8
@@ -35,9 +35,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         self.metrics = [
             'mAUROC_sp_max', 'mAUROC_px',
-            # 'mAP_sp_max', 'mF1_max_sp_max',
-            # 'mAUPRO_px', 
-            # 'mAP_px', 'mF1_max_px',
+            'mAP_sp_max', 'mF1_max_sp_max',
+            'mAUPRO_px', 
+            'mAP_px', 'mF1_max_px',
         ]
 
         # ==> Data
@@ -86,9 +86,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             model_decoder=self.model_decoder, 
             stats_config=self.stats_config
             memory_mode='both',           # Tùy chọn: 'channel', 'spatial', 'both', 'none'
-            fusion_mode='concat',         # Tùy chọn: 'concat', 'add', 'gate', 'weighted_sum'
-            channel_memory_size=256,
-            spatial_memory_size=256,
+            fusion_mode='add_linear',         # Tùy chọn: 'concat', 'add', 'gate', 'weighted_sum'
+            channel_memory_size=128,
+            spatial_memory_size=128,
+            mem_mask_ratio=0.8,
+            top_k=32,
         )
 
         # Evaluator, Optimizer
@@ -145,4 +147,4 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.run_id = None
         self.wandb.dir = None
         self.wandb.login = True
-        self.wandb.api_key = "0f2ca680372a916c31aab5ede7bbefab410fe503"
+        self.wandb.api_key = ""
