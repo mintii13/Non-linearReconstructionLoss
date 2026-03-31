@@ -14,9 +14,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # Stats Config
         self.stats_config = dict(
-            ci_ratio=95,            
+            ci_ratio=90,            
             activation_type='sigmoid',
-            enabled=False             
+            enabled=True             
         )
         self.seed = 42
         self.size = 256
@@ -96,7 +96,6 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.trainer.name = 'UniADTrainer' 
         self.trainer.logdir_sub = ''
         self.trainer.resume_dir = ''
-        self.trainer.resume_dir = 'icme_checkpoint/visa/nocalibrate'
         self.trainer.epoch_full = self.epoch_full
         
         self.trainer.scheduler_kwargs = dict(
@@ -130,11 +129,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # === WandB ===
         self.wandb = Namespace()
         self.wandb.enabled = False
-        self.wandb.project = "Ader_VisA_Global" 
+        self.wandb.project = "Non-linear_VisA" 
         self.wandb.entity = None 
-        self.wandb.name = 'Baseline_Sigmoid90_600_lr0.0001_512_seede42'
+        self.wandb.name = 'Baseline_Sigmoid90_250_lr0.0001_seede42'
         self.wandb.tags = ["visa", "baseline", "replica"]
-        self.wandb.notes = "baseline with sigmoid channel."
+        self.wandb.notes = ""
         self.wandb.mode = "online"
         self.wandb.group = None
         self.wandb.job_type = "train"
@@ -142,3 +141,4 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.run_id = None
         self.wandb.dir = None
         self.wandb.login = True
+        self.wandb.api_key = ""

@@ -156,7 +156,7 @@ class Baseline(nn.Module):
             
         else:
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
-            feature_align = activation_fn(feature_align)
+            feature_align = feature_align
         
         pred = torch.sqrt(torch.sum((feature_rec - feature_align) ** 2, dim=1, keepdim=True))
         pred = self.upsample(pred)
