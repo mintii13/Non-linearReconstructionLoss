@@ -90,7 +90,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             channel_memory_size=128,
             spatial_memory_size=128,
             mem_mask_ratio=0.8,
-            top_k=128,
+            top_k=112,
         )
         print(f"top_k: {self.model.kwargs['top_k']}")
 
