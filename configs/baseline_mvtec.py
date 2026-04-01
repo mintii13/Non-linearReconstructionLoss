@@ -14,7 +14,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # Stats Config
         self.stats_config = dict(
-            ci_ratio=90,            
+            ci_ratio=95,            
             activation_type='sigmoid',
             enabled=True             
         )
@@ -84,14 +84,15 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
-            stats_config=self.stats_config
+            stats_config=self.stats_config,
             memory_mode='both',           # Tùy chọn: 'channel', 'spatial', 'both', 'none'
             fusion_mode='add_linear',         # Tùy chọn: 'concat', 'add', 'gate', 'weighted_sum'
             channel_memory_size=128,
             spatial_memory_size=128,
             mem_mask_ratio=0.8,
-            top_k=32,
+            top_k=128,
         )
+        print(f"top_k: {self.model.kwargs['top_k']}")
 
         # Evaluator, Optimizer
         self.evaluator.kwargs = dict(metrics=self.metrics, pooling_ks=[16, 16], max_step_aupro=100)
@@ -101,7 +102,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # Trainer config
         self.trainer.name = 'UniADTrainer' 
         self.trainer.logdir_sub = ''
-        self.trainer.resume_dir = ''
+        self.trainer.resume_dir = 'sigmoid_dual_checkpoint'
         self.trainer.epoch_full = self.epoch_full
         
         self.trainer.scheduler_kwargs = dict(
@@ -134,8 +135,8 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         # === WandB ===
         self.wandb = Namespace()
-        self.wandb.enabled = True
-        self.wandb.project = "Ader_MVTec_Global" 
+        self.wandb.enabled = False
+        self.wandb.project = "Ader_MVTec_6710" 
         self.wandb.entity = None 
         self.wandb.name = 'BaselineLnorm_Sigmoid90_500_lr0.0001_512_seede42'
         self.wandb.tags = ["mvtec", "baseline", "replica"]

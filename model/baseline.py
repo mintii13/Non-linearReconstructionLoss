@@ -56,9 +56,9 @@ class ChannelMemoryModule(nn.Module):
             mask_indices = torch.randperm(self.mem_dim, device=attention_scores.device)[:num_masked]
             attention_scores[:, mask_indices] = float('-inf')
 
-        if not self.training and self.top_k is not None:
-            k = min(self.top_k, self.mem_dim)
-            # Giữ top-k, mask phần còn lại
+        top_k = getattr(self, 'top_k', None)
+        if not self.training and top_k is not None:
+            k = min(top_k, self.mem_dim)
             topk_vals, topk_idx = torch.topk(attention_scores, k, dim=1)
             mask = torch.full_like(attention_scores, float('-inf'))
             mask.scatter_(1, topk_idx, topk_vals)
@@ -168,14 +168,16 @@ class SpatialMemoryModule(nn.Module):
             mask_indices = torch.randperm(self.mem_dim, device=ssim_similarity.device)[:num_masked]
             ssim_similarity[:, mask_indices] = float('-inf')
 
-        if not self.training and self.top_k is not None:
-            k = min(self.top_k, self.mem_dim)
+        attention_scores = ssim_similarity * self.scale  # tính trước
+
+        top_k = getattr(self, 'top_k', None)
+        if not self.training and top_k is not None:
+            k = min(top_k, self.mem_dim)
             topk_vals, topk_idx = torch.topk(attention_scores, k, dim=1)
             mask = torch.full_like(attention_scores, float('-inf'))
             mask.scatter_(1, topk_idx, topk_vals)
             attention_scores = mask
 
-        attention_scores = ssim_similarity * self.scale
         att_weight = F.softmax(attention_scores, dim=1)
         
         # 6. Retrieve Values: [B*C, mem_dim] x [mem_dim, H*W] -> [B*C, H*W]
