@@ -32,6 +32,7 @@ class ChannelMemoryModule(nn.Module):
         self.query_proj = nn.Linear(feature_dim, feature_dim, bias=False)
         self.key_proj = nn.Linear(feature_dim, feature_dim, bias=False)
         self.value_proj = nn.Linear(feature_dim, feature_dim, bias=False)
+        self.top_k = top_k
         
     def forward(self, input_tokens):
         # input_tokens: [H*W, B, C]
@@ -50,7 +51,7 @@ class ChannelMemoryModule(nn.Module):
         
         # Cosine Similarity (Khoảng giá trị [-1, 1])
         attention_scores = torch.mm(queries_norm, keys_norm.t())
-        
+
         if self.training and self.mem_mask_ratio > 0:
             num_masked = int(self.mem_dim * self.mem_mask_ratio)
             mask_indices = torch.randperm(self.mem_dim, device=attention_scores.device)[:num_masked]
@@ -103,6 +104,7 @@ class SpatialMemoryModule(nn.Module):
         self.query_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
         self.key_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
         self.value_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
+        self.top_k = top_k
 
     def compute_ssim_similarity(self, query_patterns, memory_patterns):
         # query_patterns: [N_samples, H, W] (where N_samples = B*C)
