@@ -108,7 +108,7 @@ class UniADTrainer(BaseTrainer):
 		
 		ci_ratio = model_ref.stats_config['ci_ratio']
 		tail = (100 - ci_ratio) / 2.0
-		numerator = 8.0 if model_ref.activation_type == 'sigmoid' else 4.8
+		numerator = 6.0 if model_ref.activation_type == 'sigmoid' else 4.8
 		
 		k_list      = []
 		lower_list  = []
