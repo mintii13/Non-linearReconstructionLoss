@@ -14,9 +14,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # Stats Config
         self.stats_config = dict(
-            ci_ratio=95,            
+            ci_ratio=83,            
             activation_type='sigmoid',
-            enabled=True             
+            enabled=True          
         )
         self.seed = 42
         self.size = 256
@@ -31,7 +31,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.batch_test_per = 8
         
         self.lr = 1e-4 * self.batch_train / 8 
-        self.weight_decay = 0.0001
+        self.weight_decay = 0.001
         
         self.metrics = [
             'mAUROC_sp_max', 'mAUROC_px',
@@ -42,7 +42,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # ==> Data
         self.data.type = 'DefaultAD'
-        self.data.root = 'data/mvtec'
+        self.data.root = '/kaggle/working/mvtec'
         self.data.meta = 'meta.json'
         self.data.cls_names = []
 
@@ -80,19 +80,31 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.model.name = 'baseline' 
         self.model.kwargs = dict(
             pretrained=False, 
-            checkpoint_path='',
+            checkpoint_path='', 
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
             stats_config=self.stats_config,
             memory_mode='both',           # Tùy chọn: 'channel', 'spatial', 'both', 'none'
             fusion_mode='add_linear',         # Tùy chọn: 'concat', 'add', 'gate', 'weighted_sum'
+            mem_mask_ratio=0.8,
+            top_k=5,
             channel_memory_size=128,
             spatial_memory_size=128,
-            mem_mask_ratio=0.8,
-            top_k=112,
+            hidden_dim=512,
+            nhead=8,
+            num_encoder_layers=4,
+            num_decoder_layers=4,
+            dim_feedforward=1024,
+            dropout=0.1,
+            activation='relu',
+            normalize_before=False,
+            pos_embed_type='learned',
+            # Jitter
+            feature_jitter={'scale': 20.0, 'prob': 1.0},
+            # Initializer
+            initializer={'method': 'xavier_uniform'},
         )
-        print(f"top_k: {self.model.kwargs['top_k']}")
 
         # Evaluator, Optimizer
         self.evaluator.kwargs = dict(metrics=self.metrics, pooling_ks=[16, 16], max_step_aupro=100)
@@ -102,7 +114,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # Trainer config
         self.trainer.name = 'UniADTrainer' 
         self.trainer.logdir_sub = ''
-        self.trainer.resume_dir = 'sigmoid_dual_checkpoint'
+        self.trainer.resume_dir = ''
         self.trainer.epoch_full = self.epoch_full
         
         self.trainer.scheduler_kwargs = dict(
@@ -138,7 +150,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.enabled = False
         self.wandb.project = "Ader_MVTec_6710" 
         self.wandb.entity = None 
-        self.wandb.name = 'BaselineLnorm_Sigmoid90_500_lr0.0001_512_seede42'
+        self.wandb.name = 'Kaggle_Baseline_500_lr0.0001_512_se42_128128addli80%_SC83_de0.001'
         self.wandb.tags = ["mvtec", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"
@@ -148,4 +160,4 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.run_id = None
         self.wandb.dir = None
         self.wandb.login = True
-        self.wandb.api_key = ""
+        self.wandb.api_key = "0f2ca680372a916c31aab5ede7bbefab410fe503"

@@ -720,31 +720,39 @@ class BaselineWrapper(nn.Module):
         super().__init__()
         self.net_backbone = get_model(model_backbone)
         self.net_merge = MFCN(
-            inplanes=model_decoder['inplanes'], 
-            outplanes=model_decoder['outplanes'], 
-            instrides=[2, 4, 8, 16], 
+            inplanes=model_decoder['inplanes'],
+            outplanes=model_decoder['outplanes'],
+            instrides=[2, 4, 8, 16],
             outstrides=[16]
         )
-        # Khởi tạo Baseline
         self.net_ad = Baseline(
-            inplanes=model_decoder['outplanes'], 
-            instrides=model_decoder['instrides'], 
+            inplanes=model_decoder['outplanes'],
+            instrides=model_decoder['instrides'],
             feature_size=model_decoder['feature_size'],
-            feature_jitter=Namespace(**{'scale': 20.0, 'prob': 1.0}),
-            neighbor_mask=Namespace(**{'neighbor_size': model_decoder['neighbor_size'], 'mask': [True, True, True]}),
-            hidden_dim=512, 
-            pos_embed_type='learned', 
-            save_recon=Namespace(**{'save_dir': 'result_recon'}),
-            initializer={'method': 'xavier_uniform'}, 
+            feature_jitter=Namespace(**kwargs.get('feature_jitter', {'scale': 20.0, 'prob': 1.0})),
+            neighbor_mask=Namespace(**{
+                'neighbor_size': model_decoder['neighbor_size'],
+                'mask': kwargs.get('neighbor_mask', [True, True, True])
+            }),
+            hidden_dim=kwargs.get('hidden_dim', 512),
+            pos_embed_type=kwargs.get('pos_embed_type', 'learned'),
+            save_recon=Namespace(**kwargs.get('save_recon', {'save_dir': 'result_recon'})),
+            initializer=kwargs.get('initializer', {'method': 'xavier_uniform'}),
             stats_config=stats_config,
-            nhead=8, 
-            num_encoder_layers=4,
-            num_decoder_layers=4, 
-            dim_feedforward=1024, 
-            dropout=0.1, 
-            activation='relu',
-            normalize_before=False,
-            **kwargs
+            nhead=kwargs.get('nhead', 8),
+            num_encoder_layers=kwargs.get('num_encoder_layers', 4),
+            num_decoder_layers=kwargs.get('num_decoder_layers', 4),
+            dim_feedforward=kwargs.get('dim_feedforward', 1024),
+            dropout=kwargs.get('dropout', 0.1),
+            activation=kwargs.get('activation', 'relu'),
+            normalize_before=kwargs.get('normalize_before', False),
+            **{k: v for k, v in kwargs.items() if k not in [
+                'feature_jitter', 'neighbor_mask', 'hidden_dim', 'pos_embed_type',
+                'save_recon', 'initializer', 'nhead', 'num_encoder_layers',
+                'num_decoder_layers', 'dim_feedforward', 'dropout', 'activation',
+                'normalize_before', 'pretrained', 'checkpoint_path', 'strict',
+                'model_backbone', 'model_decoder', 'stats_config',
+            ]}
         )
         self.net_norm = nn.LayerNorm(model_decoder['outplanes'][0], elementwise_affine=False)
         self.frozen_layers = ['net_backbone']
