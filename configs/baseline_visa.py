@@ -12,12 +12,6 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         cfg_dataset_default.__init__(self)
         cfg_model_uniad.__init__(self)
 
-        # Stats Config
-        self.stats_config = dict(
-            ci_ratio=90,            
-            activation_type='sigmoid',
-            enabled=False             
-        )
         self.seed = 42
         self.size = 256
         
@@ -84,7 +78,6 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
-            stats_config=self.stats_config
         )
 
         # Evaluator, Optimizer
@@ -129,10 +122,10 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # === WandB ===
         self.wandb = Namespace()
         self.wandb.enabled = False
-        self.wandb.project = "Ader_VisA_NewIdea" 
+        self.wandb.project = "FeaDAD_VisA" 
         self.wandb.entity = None 
-        self.wandb.name = 'TestMaha_BaselineLnorm_500_lr0.0001_512_seede42'
-        self.wandb.tags = ["mvtec", "baseline", "replica"]
+        self.wandb.name = 'BaselineLnorm_500_lr0.0001_512_seede42'
+        self.wandb.tags = ["visa", "baseline", "replica"]
         self.wandb.notes = "baseline with sigmoid channel."
         self.wandb.mode = "online"
         self.wandb.group = None
@@ -141,4 +134,4 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.run_id = None
         self.wandb.dir = None
         self.wandb.login = True
-        self.wandb.api_key = "0f2ca680372a916c31aab5ede7bbefab410fe503"
+        self.wandb.api_key = ""

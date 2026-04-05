@@ -36,7 +36,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # ==> Data
         self.data.type = 'DefaultAD'
-        self.data.root = 'data/mvtec'
+        self.data.root = 'data/visa'
         self.data.meta = 'meta.json'
         self.data.cls_names = []
 
@@ -71,14 +71,13 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # Model Config
         self.model = Namespace()
-        self.model.name = 'baseline' 
+        self.model.name = 'feadad' 
         self.model.kwargs = dict(
             pretrained=False, 
-            checkpoint_path='', 
+            checkpoint_path='runs/decorrelation_checkpoint/visa/ckpt.pth', 
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
-            # dist_metric='maha'
         )
 
         # Evaluator, Optimizer
@@ -123,11 +122,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # === WandB ===
         self.wandb = Namespace()
         self.wandb.enabled = False
-        self.wandb.project = "FeaDAD_MVTec"
+        self.wandb.project = "FeaDAD_VisA" 
         self.wandb.entity = None 
-        self.wandb.name = 'Baseline_500_lr0.0001_512_seede42'
-        self.wandb.tags = ["mvtec", "baseline", "replica"]
-        self.wandb.notes = "baseline"
+        self.wandb.name = 'Feadad_500_lr0.0001_512_seede42'
+        self.wandb.tags = ["visa", "feadad", "replica"]
+        self.wandb.notes = "feadad with sigmoid channel."
         self.wandb.mode = "online"
         self.wandb.group = None
         self.wandb.job_type = "train"

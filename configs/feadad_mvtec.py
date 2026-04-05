@@ -89,7 +89,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # Trainer config
         self.trainer.name = 'UniADTrainer' 
         self.trainer.logdir_sub = ''
-        self.trainer.resume_dir = ''
+        self.trainer.resume_dir = 'decorrelation_checkpoint/mvtec'
         self.trainer.epoch_full = self.epoch_full
         
         self.trainer.scheduler_kwargs = dict(
@@ -123,11 +123,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         # === WandB ===
         self.wandb = Namespace()
         self.wandb.enabled = False
-        self.wandb.project = "Ader_MVTec_NewIdea"
+        self.wandb.project = "FeaDAD_MVTec"
         self.wandb.entity = None 
-        self.wandb.name = 'TestMaha_Baseline_500_lr0.0001_512_seede42'
-        self.wandb.tags = ["mvtec", "baseline", "replica"]
-        self.wandb.notes = "baseline"
+        self.wandb.name = 'Feadad_500_lr0.0001_512_seede42'
+        self.wandb.tags = ["mvtec", "feadad", "replica"]
+        self.wandb.notes = "feadad with sigmoid channel."
         self.wandb.mode = "online"
         self.wandb.group = None
         self.wandb.job_type = "train"
@@ -135,4 +135,4 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.wandb.run_id = None
         self.wandb.dir = None
         self.wandb.login = True
-        self.wandb.api_key = "0f2ca680372a916c31aab5ede7bbefab410fe503"
+        self.wandb.api_key = ""
