@@ -71,7 +71,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # Model Config
         self.model = Namespace()
-        self.model.name = 'baseline' 
+        self.model.name = 'feadad' 
         self.model.kwargs = dict(
             pretrained=False, 
             checkpoint_path='', 

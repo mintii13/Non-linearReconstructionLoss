@@ -408,7 +408,7 @@ class BaselineWrapper(nn.Module):
 # 5. Register Module
 # ==========================================
 @MODEL.register_module
-def baseline(pretrained=False, **kwargs):
+def feadad(pretrained=False, **kwargs):
     model = BaselineWrapper(**kwargs)
     return model
 
