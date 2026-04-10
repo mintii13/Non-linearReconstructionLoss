@@ -470,12 +470,13 @@ class Baseline(nn.Module):
                 combined_features = torch.cat([channel_features, spatial_features], dim=-1)
                 memory_features = self.fusion_layer(combined_features)
         # ==================================================================
+        
+        post_fusion_tokens = memory_features  # [L, B, C] - after fusion mem, before merge projection
         # Concatenate pre-query features with retrieved features
         if self.memory_fusion_proj is not None and len(memory_features_list) > 0:
             concat_features = torch.cat([pre_memory_tokens, memory_features], dim=-1)  # [L, B, 2C]
             memory_features = self.memory_fusion_proj(concat_features)  # [L, B, C]
-        post_fusion_tokens = memory_features  # [L, B, C] - after fusion, before decoder
-
+        post_fusion_proj = memory_features  # [L, B, C] - after fusion projection (if exists)
         decoded_tokens = self.decoder(memory_features, memory_features, pos=pos_embed)
         
         feature_rec_tokens = self.output_proj(decoded_tokens)
@@ -526,7 +527,8 @@ class Baseline(nn.Module):
             "pre_memory_tokens":  pre_memory_tokens,     # [L, B, hidden_dim]
             "channel_result":     channel_result,        # dict with att_weight, or None
             "spatial_result":     spatial_result,        # dict with att_weight, or None
-            "post_fusion_tokens": post_fusion_tokens,    # [L, B, hidden_dim]
+            "post_fusion_tokens": post_fusion_tokens,   
+            "post_fusion_proj":   post_fusion_proj,      # [L, B, hidden_dim]
             "pre_sigmoid_rec_tokens_for_grad": pre_sigmoid_rec,
         }
         return output_dict

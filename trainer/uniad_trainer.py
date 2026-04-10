@@ -197,7 +197,7 @@ class UniADTrainer(BaseTrainer):
 		pre_orig = output_dict.get('pre_sigmoid_orig')  # [B, C, H, W]
 
 		if pre_rec is not None and pre_orig is not None:
-			# Percentile của reconstructed (dùng flatten toàn bộ)
+			# Percentile của reconstructed
 			rec_flat  = pre_rec.flatten()
 			orig_flat = pre_orig.flatten()
 
@@ -215,14 +215,13 @@ class UniADTrainer(BaseTrainer):
 			metrics['PreSigmoid/delta_mean'] = (pre_rec - pre_orig).abs().mean().item()
 
 			# ---- 2. Delta_normal / Delta_outlier dùng per-channel CI bounds ----
-			# lower_bound, upper_bound shape: [C] -> broadcast sang [1, C, 1, 1]
-			lower = model_ref.lower_bound.detach()[None, :, None, None]  # [1, C, 1, 1]
-			upper = model_ref.upper_bound.detach()[None, :, None, None]  # [1, C, 1, 1]
+			lower = model_ref.lower_bound.detach()[None, :, None, None]
+			upper = model_ref.upper_bound.detach()[None, :, None, None]
 
-			normal_mask  = (pre_orig >= lower) & (pre_orig <= upper)  # [B, C, H, W] bool
+			normal_mask  = (pre_orig >= lower) & (pre_orig <= upper)
 			outlier_mask = ~normal_mask
 
-			sq_diff = (pre_rec - pre_orig) ** 2  # [B, C, H, W]
+			sq_diff = (pre_rec - pre_orig) ** 2
 
 			if normal_mask.any():
 				metrics['PreSigmoid/delta_normal'] = sq_diff[normal_mask].mean().item()
@@ -230,107 +229,92 @@ class UniADTrainer(BaseTrainer):
 			if outlier_mask.any():
 				metrics['PreSigmoid/delta_outlier'] = sq_diff[outlier_mask].mean().item()
 
-			# Tỷ lệ pixel nằm trong normal range (sanity check)
 			metrics['PreSigmoid/normal_ratio'] = normal_mask.float().mean().item()
 
-		# ---- 3. Memory perturbation: cosine similarity before/after ----
-		pre_mem   = output_dict.get('pre_memory_tokens')   # [L, B, hidden_dim]
-		post_fuse = output_dict.get('post_fusion_tokens')  # [L, B, hidden_dim]
+		# ---- 3. Memory perturbation ----
+		pre_mem   = output_dict.get('pre_memory_tokens')      # [L, B, hidden_dim]
+		post_fusion_tokens = output_dict.get('post_fusion_tokens')  # after dual mem fusion
+		post_fusion_proj = output_dict.get('post_fusion_proj')      # after concat + projection
 
-		if pre_mem is not None and post_fuse is not None:
-			# Flatten [L*B, hidden_dim] để tính cosine similarity
+		if pre_mem is not None and post_fusion_tokens is not None:
 			pre_flat  = pre_mem.reshape(-1, pre_mem.shape[-1])
-			post_flat = post_fuse.reshape(-1, post_fuse.shape[-1])
-			cos_sim_overall = F.cosine_similarity(pre_flat, post_flat, dim=-1).mean().item()
-			metrics['Memory/cos_sim_before_after_fuse'] = cos_sim_overall
+			post_fusion_flat = post_fusion_tokens.reshape(-1, post_fusion_tokens.shape[-1])
+			metrics['Memory/cos_sim_pre_vs_post_fusion'] = F.cosine_similarity(pre_flat, post_fusion_flat, dim=-1).mean().item()
 
-		# ---- 4. Channel memory: cosine sim + normalized entropy ----
+		if pre_mem is not None and post_fusion_proj is not None:
+			pre_flat = pre_mem.reshape(-1, pre_mem.shape[-1])
+			proj_flat = post_fusion_proj.reshape(-1, post_fusion_proj.shape[-1])
+			metrics['Memory/cos_sim_pre_vs_post_proj'] = F.cosine_similarity(pre_flat, proj_flat, dim=-1).mean().item()
+
+		if post_fusion_tokens is not None and post_fusion_proj is not None:
+			fusion_flat = post_fusion_tokens.reshape(-1, post_fusion_tokens.shape[-1])
+			proj_flat = post_fusion_proj.reshape(-1, post_fusion_proj.shape[-1])
+			metrics['Memory/cos_sim_fusion_vs_proj'] = F.cosine_similarity(fusion_flat, proj_flat, dim=-1).mean().item()
+			metrics['Memory/delta_fusion_vs_proj'] = (post_fusion_proj - post_fusion_tokens).abs().mean().item()
+
+		# ---- 4. Channel memory metrics ----
 		channel_result = output_dict.get('channel_result')
 		if channel_result is not None:
-			ch_out = channel_result['output']  # [L, B, hidden_dim]
+			ch_out = channel_result['output']
 			if pre_mem is not None:
 				pre_f  = pre_mem.reshape(-1, pre_mem.shape[-1])
 				ch_f   = ch_out.reshape(-1, ch_out.shape[-1])
 				metrics['Memory/cos_sim_before_after_channel'] = F.cosine_similarity(pre_f, ch_f, dim=-1).mean().item()
 
-			att_w = channel_result['att_weight']  # [L*B, mem_dim]
+			att_w = channel_result['att_weight']
 			mem_dim_ch = att_w.shape[-1]
 			entropy_ch = -(att_w * torch.log(att_w + 1e-9)).sum(dim=-1).mean()
 			max_entropy = torch.log(torch.tensor(float(mem_dim_ch), device=att_w.device))
 			metrics['Memory/active_slot_ratio_channel'] = (entropy_ch / max_entropy).item()
 
-		# ---- 5. Spatial memory: cosine sim + normalized entropy ----
+			# Memory slot diversity
+			mem_slots = channel_result['memory']
+			mem_norm  = F.normalize(mem_slots, p=2, dim=-1)
+			cos_matrix = torch.mm(mem_norm, mem_norm.t())
+			mask_upper = torch.triu(torch.ones_like(cos_matrix, dtype=torch.bool), diagonal=1)
+			pairwise_cos = cos_matrix[mask_upper]
+			metrics['Memory/channel_slot_cos_mean'] = pairwise_cos.mean().item()
+			metrics['Memory/channel_slot_cos_max']  = pairwise_cos.max().item()
+			metrics['Memory/channel_att_weight_variance'] = att_w.var(dim=0).mean().item()
+
+		# ---- 5. Spatial memory metrics ----
 		spatial_result = output_dict.get('spatial_result')
 		if spatial_result is not None:
-			sp_out = spatial_result['output']  # [L, B, hidden_dim]
+			sp_out = spatial_result['output']
 			if pre_mem is not None:
-				pre_f  = pre_mem.reshape(-1, pre_mem.shape[-1])
-				sp_f   = sp_out.reshape(-1, sp_out.shape[-1])
+				pre_f = pre_mem.reshape(-1, pre_mem.shape[-1])
+				sp_f  = sp_out.reshape(-1, sp_out.shape[-1])
 				metrics['Memory/cos_sim_before_after_spatial'] = F.cosine_similarity(pre_f, sp_f, dim=-1).mean().item()
 
-			att_w = spatial_result['att_weight']  # [B*C, mem_dim]
+			att_w = spatial_result['att_weight']
 			mem_dim_sp = att_w.shape[-1]
 			entropy_sp = -(att_w * torch.log(att_w + 1e-9)).sum(dim=-1).mean()
 			max_entropy = torch.log(torch.tensor(float(mem_dim_sp), device=att_w.device))
 			metrics['Memory/active_slot_ratio_spatial'] = (entropy_sp / max_entropy).item()
 
-		# ---- 6. Variance của post_fusion_tokens ----
-		if post_fuse is not None:
-			# post_fuse: [L, B, hidden_dim]
-			# Tính variance theo batch dimension để xem output có diverse không
-			# Nếu variance thấp → output gần constant → decoder bypass memory
-			
-			# Variance theo spatial+batch dimension, giữ hidden dim
-			post_fuse_flat = post_fuse.reshape(-1, post_fuse.shape[-1])  # [L*B, hidden_dim]
-			
-			# Variance trung bình trên mỗi hidden dimension, rồi mean over dims
-			var_per_dim = post_fuse_flat.var(dim=0)  # [hidden_dim]
-			metrics['Memory/post_fusion_variance_mean'] = var_per_dim.mean().item()
-			metrics['Memory/post_fusion_variance_min']  = var_per_dim.min().item()
-
-		# ---- 7. Cosine similarity giữa các memory slots ----
-		# Nếu slots giống nhau → memory collapse → decoder nhận cùng 1 value
-		# Nếu slots đa dạng   → memory có khả năng encode nhiều pattern khác nhau
-		if channel_result is not None:
-			mem_slots = channel_result['memory']  # [mem_dim, feature_dim]
-			mem_norm  = F.normalize(mem_slots, p=2, dim=-1)  # [mem_dim, feature_dim]
-			
-			# Tính pairwise cosine similarity matrix [mem_dim, mem_dim]
-			cos_matrix = torch.mm(mem_norm, mem_norm.t())
-			
-			# Lấy upper triangle (loại bỏ diagonal = 1)
-			mask_upper = torch.triu(torch.ones_like(cos_matrix, dtype=torch.bool), diagonal=1)
-			pairwise_cos = cos_matrix[mask_upper]
-			
-			metrics['Memory/channel_slot_cos_mean'] = pairwise_cos.mean().item()
-			metrics['Memory/channel_slot_cos_max']  = pairwise_cos.max().item()
-			# Nếu mean gần 0, max << 1 → slots đa dạng → memory không collapse
-
-		if spatial_result is not None:
-			mem_slots = spatial_result['memory']  # [mem_dim, H, W]
-			mem_dim_s = mem_slots.shape[0]
-			mem_flat  = mem_slots.view(mem_dim_s, -1)  # [mem_dim, H*W]
-			mem_norm  = F.normalize(mem_flat, p=2, dim=-1)
-			
+			# Memory slot diversity
+			mem_slots = spatial_result['memory']
+			mem_flat = mem_slots.view(mem_slots.shape[0], -1)
+			mem_norm = F.normalize(mem_flat, p=2, dim=-1)
 			cos_matrix = torch.mm(mem_norm, mem_norm.t())
 			mask_upper = torch.triu(torch.ones_like(cos_matrix, dtype=torch.bool), diagonal=1)
 			pairwise_cos = cos_matrix[mask_upper]
-			
 			metrics['Memory/spatial_slot_cos_mean'] = pairwise_cos.mean().item()
 			metrics['Memory/spatial_slot_cos_max']  = pairwise_cos.max().item()
+			metrics['Memory/spatial_att_weight_variance'] = att_w.var(dim=0).mean().item()
 
-		if channel_result is not None:
-			att_w = channel_result['att_weight']  # [L*B, mem_dim]
-			# Variance của attention weights theo sample dimension
-			# Cao → mỗi input attend vào slots khác nhau → memory đang dùng input info
-			# Thấp → mọi input attend giống nhau → memory bypass input
-			att_var = att_w.var(dim=0).mean().item()  # variance across samples, mean across slots
-			metrics['Memory/channel_att_weight_variance'] = att_var
+		# ---- 6. Variance của các token features ----
+		if post_fusion_proj is not None:
+			proj_flat = post_fusion_proj.reshape(-1, post_fusion_proj.shape[-1])
+			var_per_dim = proj_flat.var(dim=0)
+			metrics['Memory/post_proj_variance_mean'] = var_per_dim.mean().item()
+			metrics['Memory/post_proj_variance_min'] = var_per_dim.min().item()
+			metrics['Memory/post_proj_l2_norm'] = torch.norm(proj_flat, p=2, dim=-1).mean().item()
 
-		if spatial_result is not None:
-			att_w = spatial_result['att_weight']  # [B*C, mem_dim]
-			att_var = att_w.var(dim=0).mean().item()
-			metrics['Memory/spatial_att_weight_variance'] = att_var
+		if post_fusion_tokens is not None:
+			fusion_flat = post_fusion_tokens.reshape(-1, post_fusion_tokens.shape[-1])
+			var_per_dim = fusion_flat.var(dim=0)
+			metrics['Memory/post_fusion_variance_mean'] = var_per_dim.mean().item()
 
 		return metrics
 
