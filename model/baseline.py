@@ -359,7 +359,10 @@ class Baseline(nn.Module):
         self.output_proj = nn.Linear(hidden_dim, inplanes[0])
         self.stats_config = stats_config
         self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
-        
+        self.memory_fusion_proj = None
+        if self.use_channel_memory or self.use_spatial_memory:
+            self.memory_fusion_proj = nn.Linear(hidden_dim * 2, hidden_dim)
+            print('-> Baseline: Initialized Memory Fusion Projection (concat pre-query + retrieved)')
         # K values
         k_list = stats_config.get('k_values_272', None) if stats_config else None
         
@@ -467,7 +470,10 @@ class Baseline(nn.Module):
                 combined_features = torch.cat([channel_features, spatial_features], dim=-1)
                 memory_features = self.fusion_layer(combined_features)
         # ==================================================================
-
+        # Concatenate pre-query features with retrieved features
+        if self.memory_fusion_proj is not None and len(memory_features_list) > 0:
+            concat_features = torch.cat([pre_memory_tokens, memory_features], dim=-1)  # [L, B, 2C]
+            memory_features = self.memory_fusion_proj(concat_features)  # [L, B, C]
         post_fusion_tokens = memory_features  # [L, B, C] - after fusion, before decoder
 
         decoded_tokens = self.decoder(memory_features, memory_features, pos=pos_embed)
