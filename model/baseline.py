@@ -360,9 +360,11 @@ class Baseline(nn.Module):
         self.stats_config = stats_config
         self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
         self.memory_fusion_proj = None
-        if self.use_channel_memory or self.use_spatial_memory:
+        if kwargs.get('use_merge_proj', False) and (self.use_channel_memory or self.use_spatial_memory):
             self.memory_fusion_proj = nn.Linear(hidden_dim * 2, hidden_dim)
             print('-> Baseline: Initialized Memory Fusion Projection (concat pre-query + retrieved)')
+        else:
+            print('-> Baseline: Memory Fusion Projection DISABLED (using only post_fusion_tokens)')
         # K values
         k_list = stats_config.get('k_values_272', None) if stats_config else None
         
@@ -471,12 +473,15 @@ class Baseline(nn.Module):
                 memory_features = self.fusion_layer(combined_features)
         # ==================================================================
         
-        post_fusion_tokens = memory_features  # [L, B, C] - after fusion mem, before merge projection
-        # Concatenate pre-query features with retrieved features
+        post_fusion_tokens = memory_features  # after dual memory fusion (add/project)
         if self.memory_fusion_proj is not None and len(memory_features_list) > 0:
-            concat_features = torch.cat([pre_memory_tokens, memory_features], dim=-1)  # [L, B, 2C]
-            memory_features = self.memory_fusion_proj(concat_features)  # [L, B, C]
-        post_fusion_proj = memory_features  # [L, B, C] - after fusion projection (if exists)
+            concat_features = torch.cat([pre_memory_tokens, memory_features], dim=-1)
+            memory_features = self.memory_fusion_proj(concat_features)
+            post_fusion_proj = memory_features
+        else:
+            # Không dùng projection: decoder nhận trực tiếp post_fusion_tokens
+            post_fusion_proj = post_fusion_tokens   # giữ nguyên để output_dict có key này
+
         decoded_tokens = self.decoder(memory_features, memory_features, pos=pos_embed)
         
         feature_rec_tokens = self.output_proj(decoded_tokens)

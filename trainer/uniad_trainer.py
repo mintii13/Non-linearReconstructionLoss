@@ -141,43 +141,37 @@ class UniADTrainer(BaseTrainer):
 
 		del all_features, full_features, feature_np
 		torch.cuda.empty_cache()
-
-	@torch.no_grad()
-	def _accumulate_grad_diagnostics(self, grad_tokens):
-		pre_rec_map = self.output_dict.get('pre_sigmoid_rec')  # [B, C, H, W]
-		if pre_rec_map is None:
-			return
-
-		model_ref = self._get_model_ref()
-		lower = model_ref.lower_bound.detach()[None, :, None, None]
-		upper = model_ref.upper_bound.detach()[None, :, None, None]
-
-		normal_mask  = (pre_rec_map >= lower) & (pre_rec_map <= upper)
-		outlier_mask = ~normal_mask
-
-		H, W = pre_rec_map.shape[2], pre_rec_map.shape[3]
-		L, B, C = grad_tokens.shape
-
-		# Dùng rearrange để consistent với model forward
-		grad_map = rearrange(grad_tokens, "(h w) b c -> b c h w", h=H, w=W)
-
-		grad_magnitude = grad_map.abs()
-
-		grad_normal_mean  = grad_magnitude[normal_mask].mean().item()  if normal_mask.any()  else 0.0
-		grad_outlier_mean = grad_magnitude[outlier_mask].mean().item() if outlier_mask.any() else 0.0
-		ratio = grad_normal_mean / (grad_outlier_mean + 1e-9)
-		normal_ratio_rec  = normal_mask.float().mean().item()
-
-		key_map = {
-			'Gradient/grad_normal_mean':          grad_normal_mean,
-			'Gradient/grad_outlier_mean':         grad_outlier_mean,
-			'Gradient/grad_normal_outlier_ratio': ratio,
-			'Gradient/rec_normal_ratio':          normal_ratio_rec,
-		}
-		for k, v in key_map.items():
-			if k not in self._diag_accum:
-				self._diag_accum[k] = 0.0
-			self._diag_accum[k] += v
+	
+	def _compute_ssim_between_maps(self, pred, target, H=None, W=None):
+		"""
+		Compute SSIM between two feature maps of shape [B, C, H, W] or [L, B, C]
+		Returns mean SSIM over batch and channels.
+		"""
+		if pred.dim() == 3:
+			L, B, C = pred.shape
+			# Nếu không có H,W từ ngoài, tự tính căn bậc hai (chỉ dùng khi feature map vuông)
+			if H is None or W is None:
+				H = W = int(L ** 0.5)
+			pred = pred.permute(1, 2, 0).reshape(B, C, H, W)
+			target = target.permute(1, 2, 0).reshape(B, C, H, W)
+		
+		B, C, H, W = pred.shape
+		pred_flat = pred.view(B * C, H * W)
+		target_flat = target.view(B * C, H * W)
+		
+		pred_mean = pred_flat.mean(dim=1, keepdim=True)
+		target_mean = target_flat.mean(dim=1, keepdim=True)
+		pred_var = pred_flat.var(dim=1, keepdim=True)
+		target_var = target_flat.var(dim=1, keepdim=True)
+		pred_centered = pred_flat - pred_mean
+		target_centered = target_flat - target_mean
+		cov = (pred_centered * target_centered).mean(dim=1, keepdim=True)
+		
+		c1, c2 = 0.01, 0.03
+		numerator = (2 * pred_mean * target_mean + c1) * (2 * cov + c2)
+		denominator = (pred_mean**2 + target_mean**2 + c1) * (pred_var + target_var + c2)
+		ssim = numerator / (denominator + 1e-8)
+		return ssim.mean().item()
 
 	# ============================================================
 	# _compute_diagnostic_metrics: tính tất cả diagnostic metrics
@@ -185,136 +179,87 @@ class UniADTrainer(BaseTrainer):
 	# ============================================================
 	@torch.no_grad()
 	def _compute_diagnostic_metrics(self, output_dict):
-		"""
-		Trả về dict các scalar metrics để log lên WandB.
-		Tất cả tính trong no_grad để không ảnh hưởng training.
-		"""
 		metrics = {}
 		model_ref = self._get_model_ref()
 
-		# ---- 1. Pre-sigmoid range validation ----
-		pre_rec  = output_dict.get('pre_sigmoid_rec')   # [B, C, H, W]
-		pre_orig = output_dict.get('pre_sigmoid_orig')  # [B, C, H, W]
+		if hasattr(model_ref, 'feature_size'):
+			H, W = model_ref.feature_size
+		elif hasattr(model_ref, 'net_ad') and hasattr(model_ref.net_ad, 'feature_size'):
+			H, W = model_ref.net_ad.feature_size
+		else:
+			H = W = None
 
+		# ----- 1. Non‑linear loss: delta normal/outlier (đã có trong _accumulate, nhưng vẫn tính lại ở đây để log) -----
+		pre_rec = output_dict.get('pre_sigmoid_rec')
+		pre_orig = output_dict.get('pre_sigmoid_orig')
 		if pre_rec is not None and pre_orig is not None:
-			# Percentile của reconstructed
-			rec_flat  = pre_rec.flatten()
-			orig_flat = pre_orig.flatten()
-
-			metrics['PreSigmoid/rec_p5']   = torch.quantile(rec_flat,  0.05).item()
-			metrics['PreSigmoid/rec_p25']  = torch.quantile(rec_flat,  0.25).item()
-			metrics['PreSigmoid/rec_p50']  = torch.quantile(rec_flat,  0.50).item()
-			metrics['PreSigmoid/rec_p75']  = torch.quantile(rec_flat,  0.75).item()
-			metrics['PreSigmoid/rec_p95']  = torch.quantile(rec_flat,  0.95).item()
-
-			metrics['PreSigmoid/orig_p5']  = torch.quantile(orig_flat, 0.05).item()
-			metrics['PreSigmoid/orig_p50'] = torch.quantile(orig_flat, 0.50).item()
-			metrics['PreSigmoid/orig_p95'] = torch.quantile(orig_flat, 0.95).item()
-
-			# Delta (mean absolute diff) overall
-			metrics['PreSigmoid/delta_mean'] = (pre_rec - pre_orig).abs().mean().item()
-
-			# ---- 2. Delta_normal / Delta_outlier dùng per-channel CI bounds ----
 			lower = model_ref.lower_bound.detach()[None, :, None, None]
 			upper = model_ref.upper_bound.detach()[None, :, None, None]
-
-			normal_mask  = (pre_orig >= lower) & (pre_orig <= upper)
+			normal_mask = (pre_orig >= lower) & (pre_orig <= upper)
 			outlier_mask = ~normal_mask
-
 			sq_diff = (pre_rec - pre_orig) ** 2
-
 			if normal_mask.any():
 				metrics['PreSigmoid/delta_normal'] = sq_diff[normal_mask].mean().item()
-			
 			if outlier_mask.any():
 				metrics['PreSigmoid/delta_outlier'] = sq_diff[outlier_mask].mean().item()
-
 			metrics['PreSigmoid/normal_ratio'] = normal_mask.float().mean().item()
 
-		# ---- 3. Memory perturbation ----
-		pre_mem   = output_dict.get('pre_memory_tokens')      # [L, B, hidden_dim]
-		post_fusion_tokens = output_dict.get('post_fusion_tokens')  # after dual mem fusion
-		post_fusion_proj = output_dict.get('post_fusion_proj')      # after concat + projection
+		# ----- 2. Channel memory: mean attention score (raw cosine) -----
+		channel_res = output_dict.get('channel_result')
+		if channel_res is not None:
+			# attention_scores shape [N*B, mem_dim], chưa qua softmax, đã nhân scale=10
+			att_scores = channel_res['attention_scores']   # raw scores (cosine * scale)
+			metrics['Memory/channel_attention_mean'] = att_scores.mean().item()
+			# active slot ratio & slot diversity
+			att_w = channel_res['att_weight']
+			mem_dim = att_w.shape[-1]
+			entropy = -(att_w * torch.log(att_w + 1e-9)).sum(dim=-1).mean()
+			max_entropy = torch.log(torch.tensor(float(mem_dim), device=att_w.device))
+			metrics['Memory/active_slot_ratio_channel'] = (entropy / max_entropy).item()
+			mem_slots = channel_res['memory']  # [mem_dim, C]
+			mem_norm = F.normalize(mem_slots, p=2, dim=-1)
+			cos_mat = torch.mm(mem_norm, mem_norm.t())
+			mask_upper = torch.triu(torch.ones_like(cos_mat, dtype=torch.bool), diagonal=1)
+			pairwise = cos_mat[mask_upper]
+			metrics['Memory/channel_slot_cos_mean'] = pairwise.mean().item()
 
-		if pre_mem is not None and post_fusion_tokens is not None:
-			pre_flat  = pre_mem.reshape(-1, pre_mem.shape[-1])
-			post_fusion_flat = post_fusion_tokens.reshape(-1, post_fusion_tokens.shape[-1])
-			metrics['Memory/cos_sim_pre_vs_post_fusion'] = F.cosine_similarity(pre_flat, post_fusion_flat, dim=-1).mean().item()
-
-		if pre_mem is not None and post_fusion_proj is not None:
-			pre_flat = pre_mem.reshape(-1, pre_mem.shape[-1])
-			proj_flat = post_fusion_proj.reshape(-1, post_fusion_proj.shape[-1])
-			metrics['Memory/cos_sim_pre_vs_post_proj'] = F.cosine_similarity(pre_flat, proj_flat, dim=-1).mean().item()
-
-		if post_fusion_tokens is not None and post_fusion_proj is not None:
-			fusion_flat = post_fusion_tokens.reshape(-1, post_fusion_tokens.shape[-1])
-			proj_flat = post_fusion_proj.reshape(-1, post_fusion_proj.shape[-1])
-			metrics['Memory/cos_sim_fusion_vs_proj'] = F.cosine_similarity(fusion_flat, proj_flat, dim=-1).mean().item()
-			metrics['Memory/delta_fusion_vs_proj'] = (post_fusion_proj - post_fusion_tokens).abs().mean().item()
-
-		# ---- 4. Channel memory metrics ----
-		channel_result = output_dict.get('channel_result')
-		if channel_result is not None:
-			ch_out = channel_result['output']
-			if pre_mem is not None:
-				pre_f  = pre_mem.reshape(-1, pre_mem.shape[-1])
-				ch_f   = ch_out.reshape(-1, ch_out.shape[-1])
-				metrics['Memory/cos_sim_before_after_channel'] = F.cosine_similarity(pre_f, ch_f, dim=-1).mean().item()
-
-			att_w = channel_result['att_weight']
-			mem_dim_ch = att_w.shape[-1]
-			entropy_ch = -(att_w * torch.log(att_w + 1e-9)).sum(dim=-1).mean()
-			max_entropy = torch.log(torch.tensor(float(mem_dim_ch), device=att_w.device))
-			metrics['Memory/active_slot_ratio_channel'] = (entropy_ch / max_entropy).item()
-
-			# Memory slot diversity
-			mem_slots = channel_result['memory']
-			mem_norm  = F.normalize(mem_slots, p=2, dim=-1)
-			cos_matrix = torch.mm(mem_norm, mem_norm.t())
-			mask_upper = torch.triu(torch.ones_like(cos_matrix, dtype=torch.bool), diagonal=1)
-			pairwise_cos = cos_matrix[mask_upper]
-			metrics['Memory/channel_slot_cos_mean'] = pairwise_cos.mean().item()
-			metrics['Memory/channel_slot_cos_max']  = pairwise_cos.max().item()
-			metrics['Memory/channel_att_weight_variance'] = att_w.var(dim=0).mean().item()
-
-		# ---- 5. Spatial memory metrics ----
-		spatial_result = output_dict.get('spatial_result')
-		if spatial_result is not None:
-			sp_out = spatial_result['output']
-			if pre_mem is not None:
-				pre_f = pre_mem.reshape(-1, pre_mem.shape[-1])
-				sp_f  = sp_out.reshape(-1, sp_out.shape[-1])
-				metrics['Memory/cos_sim_before_after_spatial'] = F.cosine_similarity(pre_f, sp_f, dim=-1).mean().item()
-
-			att_w = spatial_result['att_weight']
-			mem_dim_sp = att_w.shape[-1]
-			entropy_sp = -(att_w * torch.log(att_w + 1e-9)).sum(dim=-1).mean()
-			max_entropy = torch.log(torch.tensor(float(mem_dim_sp), device=att_w.device))
-			metrics['Memory/active_slot_ratio_spatial'] = (entropy_sp / max_entropy).item()
-
-			# Memory slot diversity
-			mem_slots = spatial_result['memory']
+		# ----- 3. Spatial memory: mean SSIM similarity -----
+		spatial_res = output_dict.get('spatial_result')
+		if spatial_res is not None:
+			ssim_sim = spatial_res['ssim_similarity']   # raw SSIM [B*C, mem_dim]
+			metrics['Memory/spatial_ssim_mean'] = ssim_sim.mean().item()
+			att_w = spatial_res['att_weight']
+			mem_dim = att_w.shape[-1]
+			entropy = -(att_w * torch.log(att_w + 1e-9)).sum(dim=-1).mean()
+			max_entropy = torch.log(torch.tensor(float(mem_dim), device=att_w.device))
+			metrics['Memory/active_slot_ratio_spatial'] = (entropy / max_entropy).item()
+			mem_slots = spatial_res['memory']  # [mem_dim, H, W]
 			mem_flat = mem_slots.view(mem_slots.shape[0], -1)
 			mem_norm = F.normalize(mem_flat, p=2, dim=-1)
-			cos_matrix = torch.mm(mem_norm, mem_norm.t())
-			mask_upper = torch.triu(torch.ones_like(cos_matrix, dtype=torch.bool), diagonal=1)
-			pairwise_cos = cos_matrix[mask_upper]
-			metrics['Memory/spatial_slot_cos_mean'] = pairwise_cos.mean().item()
-			metrics['Memory/spatial_slot_cos_max']  = pairwise_cos.max().item()
-			metrics['Memory/spatial_att_weight_variance'] = att_w.var(dim=0).mean().item()
+			cos_mat = torch.mm(mem_norm, mem_norm.t())
+			mask_upper = torch.triu(torch.ones_like(cos_mat, dtype=torch.bool), diagonal=1)
+			pairwise = cos_mat[mask_upper]
+			metrics['Memory/spatial_slot_cos_mean'] = pairwise.mean().item()
 
-		# ---- 6. Variance của các token features ----
-		if post_fusion_proj is not None:
-			proj_flat = post_fusion_proj.reshape(-1, post_fusion_proj.shape[-1])
-			var_per_dim = proj_flat.var(dim=0)
-			metrics['Memory/post_proj_variance_mean'] = var_per_dim.mean().item()
-			metrics['Memory/post_proj_variance_min'] = var_per_dim.min().item()
-			metrics['Memory/post_proj_l2_norm'] = torch.norm(proj_flat, p=2, dim=-1).mean().item()
-
-		if post_fusion_tokens is not None:
-			fusion_flat = post_fusion_tokens.reshape(-1, post_fusion_tokens.shape[-1])
-			var_per_dim = fusion_flat.var(dim=0)
-			metrics['Memory/post_fusion_variance_mean'] = var_per_dim.mean().item()
+		# ----- 4. Feature change before/after memory (fusion output) -----
+		pre_mem = output_dict.get('pre_memory_tokens')          # [L,B,C]
+		post_fusion = output_dict.get('post_fusion_tokens')     # after dual memory fusion
+		if pre_mem is not None and post_fusion is not None:
+			# per‑location cosine
+			pre_flat = pre_mem.reshape(-1, pre_mem.shape[-1])
+			post_flat = post_fusion.reshape(-1, post_fusion.shape[-1])
+			cos_loc = F.cosine_similarity(pre_flat, post_flat, dim=-1)
+			metrics['Memory/cos_pre_vs_post_fusion'] = cos_loc.mean().item()
+			
+			# global cosine (GAP)
+			pre_gap = pre_mem.mean(dim=0)
+			post_gap = post_fusion.mean(dim=0)
+			cos_glob = F.cosine_similarity(pre_gap, post_gap, dim=-1).mean().item()
+			metrics['Memory/cos_gap_pre_vs_post_fusion'] = cos_glob
+			
+			# SSIM giữa pre và post (tính theo từng channel)
+			ssim_val = self._compute_ssim_between_maps(pre_mem, post_fusion,  H=H, W=W)
+			metrics['Memory/ssim_pre_vs_post_fusion'] = ssim_val
 
 		return metrics
 
@@ -374,7 +319,21 @@ class UniADTrainer(BaseTrainer):
 			pre_sig_tokens.register_hook(save_grad)
 		self.backward_term(loss_mse, self.optim)
 		if self.master and 'grad' in grad_store:
-			self._accumulate_grad_diagnostics(grad_store['grad'])
+			# Log histogram và các scalar gradient trực tiếp (không qua accumulator)
+			if self.wandb_run and self.iter % 1000 == 0:
+				grad_vals = grad_store['grad'].detach().flatten().cpu().numpy()
+				self.wandb_run.log({'Gradient/histogram': wandb.Histogram(grad_vals)}, step=self.iter)
+			
+			# Tính gradient mean, std, ratio (có thể log mỗi 1000 steps)
+			if self.wandb_run and self.iter % 1000 == 0:
+				grad_abs = grad_store['grad'].abs()
+				grad_mean = grad_abs.mean().item()
+				grad_std = grad_abs.std().item()
+				# Ratio normal/outlier nếu cần (có thể bỏ qua vì không có mask ở đây)
+				self.wandb_run.log({
+					'Gradient/mean_abs': grad_mean,
+					'Gradient/std_abs': grad_std,
+				}, step=self.iter)
 		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
 
 		# Accumulate diagnostic metrics (chỉ trên master để tiết kiệm compute)
