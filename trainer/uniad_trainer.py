@@ -261,6 +261,24 @@ class UniADTrainer(BaseTrainer):
 			ssim_val = self._compute_ssim_between_maps(pre_mem, post_fusion,  H=H, W=W)
 			metrics['Memory/ssim_pre_vs_post_fusion'] = ssim_val
 
+		# ----- 5. Feature change after merge_proj (if exists) -----
+		post_proj = output_dict.get('post_fusion_proj')
+		if pre_mem is not None and post_proj is not None:
+			# per‑location cosine
+			pre_flat = pre_mem.reshape(-1, pre_mem.shape[-1])
+			proj_flat = post_proj.reshape(-1, post_proj.shape[-1])
+			cos_loc_proj = F.cosine_similarity(pre_flat, proj_flat, dim=-1)
+			metrics['Memory/cos_pre_vs_post_proj'] = cos_loc_proj.mean().item()
+			
+			# global cosine (GAP)
+			pre_gap = pre_mem.mean(dim=0)
+			proj_gap = post_proj.mean(dim=0)
+			cos_glob_proj = F.cosine_similarity(pre_gap, proj_gap, dim=-1).mean().item()
+			metrics['Memory/cos_gap_pre_vs_post_proj'] = cos_glob_proj
+			
+			# SSIM
+			ssim_proj_val = self._compute_ssim_between_maps(pre_mem, post_proj, H=H, W=W)
+			metrics['Memory/ssim_pre_vs_post_proj'] = ssim_proj_val
 		return metrics
 
 	# ============================================================
