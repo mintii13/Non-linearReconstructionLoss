@@ -304,6 +304,21 @@ class UniADTrainer(BaseTrainer):
 			metrics['Magnitude/post_fusion_min'] = post_abs.min().item()
 			metrics['Magnitude/post_fusion_mean'] = post_abs.mean().item()
 			metrics['Magnitude/post_fusion_max'] = post_abs.max().item()
+		# ----- 7. Memory slots magnitude (channel memory) -----
+		if channel_res is not None:
+			mem_slots = channel_res['memory']  # [mem_dim, C]
+			mem_abs = mem_slots.abs()
+			metrics['Magnitude/channel_slots_min'] = mem_abs.min().item()
+			metrics['Magnitude/channel_slots_mean'] = mem_abs.mean().item()
+			metrics['Magnitude/channel_slots_max'] = mem_abs.max().item()
+
+		# ----- 8. Memory slots magnitude (spatial memory) -----
+		if spatial_res is not None:
+			mem_slots = spatial_res['memory']  # [mem_dim, H, W]
+			mem_abs = mem_slots.abs()
+			metrics['Magnitude/spatial_slots_min'] = mem_abs.min().item()
+			metrics['Magnitude/spatial_slots_mean'] = mem_abs.mean().item()
+			metrics['Magnitude/spatial_slots_max'] = mem_abs.max().item()
 		return metrics
 
 	# ============================================================
