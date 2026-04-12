@@ -202,14 +202,21 @@ class UniADTrainer(BaseTrainer):
 				metrics['PreSigmoid/delta_normal'] = sq_diff[normal_mask].mean().item()
 			if outlier_mask.any():
 				metrics['PreSigmoid/delta_outlier'] = sq_diff[outlier_mask].mean().item()
+			if 'PreSigmoid/delta_normal' in metrics and 'PreSigmoid/delta_outlier' in metrics:
+				metrics['PreSigmoid/delta_outlier_normal_ratio'] = \
+					metrics['PreSigmoid/delta_outlier'] / (metrics['PreSigmoid/delta_normal'] + 1e-8)
 			metrics['PreSigmoid/normal_ratio'] = normal_mask.float().mean().item()
 
 		# ----- 2. Channel memory: mean attention score (raw cosine) -----
 		channel_res = output_dict.get('channel_result')
 		if channel_res is not None:
 			# attention_scores shape [N*B, mem_dim], chưa qua softmax, đã nhân scale=10
-			att_scores = channel_res['attention_scores']   # raw scores (cosine * scale)
-			metrics['Memory/channel_attention_mean'] = att_scores.mean().item()
+			att_scores = channel_res['attention_scores']   # có thể chứa -inf
+			finite_mask = torch.isfinite(att_scores)
+			if finite_mask.any():
+				metrics['Memory/channel_attention_mean'] = att_scores[finite_mask].mean().item()
+			else:
+				metrics['Memory/channel_attention_mean'] = 0.0
 			# active slot ratio & slot diversity
 			att_w = channel_res['att_weight']
 			mem_dim = att_w.shape[-1]
@@ -226,8 +233,12 @@ class UniADTrainer(BaseTrainer):
 		# ----- 3. Spatial memory: mean SSIM similarity -----
 		spatial_res = output_dict.get('spatial_result')
 		if spatial_res is not None:
-			ssim_sim = spatial_res['ssim_similarity']   # raw SSIM [B*C, mem_dim]
-			metrics['Memory/spatial_ssim_mean'] = ssim_sim.mean().item()
+			ssim_sim = spatial_res['ssim_similarity']
+			finite_mask = torch.isfinite(ssim_sim)
+			if finite_mask.any():
+				metrics['Memory/spatial_ssim_mean'] = ssim_sim[finite_mask].mean().item()
+			else:
+				metrics['Memory/spatial_ssim_mean'] = 0.0
 			att_w = spatial_res['att_weight']
 			mem_dim = att_w.shape[-1]
 			entropy = -(att_w * torch.log(att_w + 1e-9)).sum(dim=-1).mean()
@@ -337,21 +348,31 @@ class UniADTrainer(BaseTrainer):
 			pre_sig_tokens.register_hook(save_grad)
 		self.backward_term(loss_mse, self.optim)
 		if self.master and 'grad' in grad_store:
+			grad = grad_store['grad']                     # [L, B, C]
+			pre_orig_map = self.output_dict.get('pre_sigmoid_orig')  # [B, C, H, W]
+			if pre_orig_map is not None:
+				model_ref = self._get_model_ref()
+				lower = model_ref.lower_bound.detach()[None, :, None, None]
+				upper = model_ref.upper_bound.detach()[None, :, None, None]
+				normal_mask = (pre_orig_map >= lower) & (pre_orig_map <= upper)
+				# Reshape grad về [B, C, H, W]
+				H, W = pre_orig_map.shape[2], pre_orig_map.shape[3]
+				grad_map = grad.permute(1, 2, 0).reshape(-1, pre_orig_map.shape[1], H, W)
+				grad_abs = grad_map.abs()
+				grad_normal_mean = grad_abs[normal_mask].mean().item() if normal_mask.any() else 0.0
+				grad_outlier_mean = grad_abs[~normal_mask].mean().item() if (~normal_mask).any() else 0.0
+				ratio = grad_normal_mean / (grad_outlier_mean + 1e-9)
+				if self.wandb_run and self.iter % 1000 == 0:
+					self.wandb_run.log({
+						'Gradient/grad_normal_mean': grad_normal_mean,
+						'Gradient/grad_outlier_mean': grad_outlier_mean,
+						'Gradient/grad_normal_outlier_ratio': ratio,
+					}, step=self.iter)
+
 			# Log histogram và các scalar gradient trực tiếp (không qua accumulator)
 			if self.wandb_run and self.iter % 1000 == 0:
 				grad_vals = grad_store['grad'].detach().flatten().cpu().numpy()
 				self.wandb_run.log({'Gradient/histogram': wandb.Histogram(grad_vals)}, step=self.iter)
-			
-			# Tính gradient mean, std, ratio (có thể log mỗi 1000 steps)
-			if self.wandb_run and self.iter % 1000 == 0:
-				grad_abs = grad_store['grad'].abs()
-				grad_mean = grad_abs.mean().item()
-				grad_std = grad_abs.std().item()
-				# Ratio normal/outlier nếu cần (có thể bỏ qua vì không có mask ở đây)
-				self.wandb_run.log({
-					'Gradient/mean_abs': grad_mean,
-					'Gradient/std_abs': grad_std,
-				}, step=self.iter)
 		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
 
 		# Accumulate diagnostic metrics (chỉ trên master để tiết kiệm compute)
