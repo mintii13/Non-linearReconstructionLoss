@@ -290,6 +290,20 @@ class UniADTrainer(BaseTrainer):
 			# SSIM
 			ssim_proj_val = self._compute_ssim_between_maps(pre_mem, post_proj, H=H, W=W)
 			metrics['Memory/ssim_pre_vs_post_proj'] = ssim_proj_val
+
+		# ----- 6. Magnitude (min, mean, max) of pre_mem and post_fusion -----
+		if pre_mem is not None and post_fusion is not None:
+			# Lấy giá trị tuyệt đối để đo magnitude (có thể dùng cả âm/dương, nhưng abs là phổ biến)
+			pre_abs = pre_mem.abs()
+			post_abs = post_fusion.abs()
+			
+			metrics['Magnitude/pre_mem_min'] = pre_abs.min().item()
+			metrics['Magnitude/pre_mem_mean'] = pre_abs.mean().item()
+			metrics['Magnitude/pre_mem_max'] = pre_abs.max().item()
+			
+			metrics['Magnitude/post_fusion_min'] = post_abs.min().item()
+			metrics['Magnitude/post_fusion_mean'] = post_abs.mean().item()
+			metrics['Magnitude/post_fusion_max'] = post_abs.max().item()
 		return metrics
 
 	# ============================================================
