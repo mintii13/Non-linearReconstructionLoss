@@ -366,85 +366,62 @@ class UniADTrainer(BaseTrainer):
 		with self.amp_autocast():
 			self.forward()
 			loss_mse = self.loss_terms['pixel'](self.feats_t, self.feats_s)
-		# ---- Register gradient hook TRƯỚC backward ----
-		grad_store = {}
-		pre_sig_tokens = self.output_dict.get('pre_sigmoid_rec_tokens_for_grad')
-		if self.master and pre_sig_tokens is not None and pre_sig_tokens.requires_grad:
-			scaler_scale = self.loss_scaler.state_dict().get('scale', 1.0) if self.loss_scaler else 1.0
-			def save_grad(grad):
-				grad_store['grad'] = (grad / scaler_scale).detach()
-			pre_sig_tokens.register_hook(save_grad)
-		self.backward_term(loss_mse, self.optim)
 		
-		# ---------- Log gradient weight của output_proj ----------
-		if self.master and 'grad' in grad_store:
-			grad_out = grad_store['grad']                     # [L, B, C_out]
-			decoded_tokens = self.output_dict.get('decoded_tokens')  # [L, B, C_in]
-			pre_orig_map = self.output_dict.get('pre_sigmoid_orig')  # [B, C_out, H, W]
-			if decoded_tokens is not None and pre_orig_map is not None:
-				model_ref = self._get_model_ref()
-				lower = model_ref.lower_bound.detach()[None, :, None, None]
-				upper = model_ref.upper_bound.detach()[None, :, None, None]
-				normal_mask = (pre_orig_map >= lower) & (pre_orig_map <= upper)  # [B, C_out, H, W]
-				
-				L, B, C_out = grad_out.shape
-				normal_mask_flat = normal_mask.permute(0, 2, 3, 1).reshape(-1, C_out)  # [L*B, C_out]
-				input_flat = decoded_tokens.reshape(-1, decoded_tokens.shape[-1])      # [L*B, C_in]
-				grad_out_flat = grad_out.reshape(-1, C_out)                            # [L*B, C_out]
-				
-				grad_weight_per_pixel = torch.einsum('bi,bj->bij', grad_out_flat, input_flat)  # [L*B, C_out, C_in]
-				
-				normal_mask_exp = normal_mask_flat.unsqueeze(-1)  # [L*B, C_out, 1]
-				normal_sum = (grad_weight_per_pixel * normal_mask_exp).sum(dim=0)      # [C_out, C_in]
-				normal_cnt = normal_mask_flat.sum(dim=0, keepdim=True).unsqueeze(-1)   # [1, C_out, 1]
-				avg_normal = normal_sum / (normal_cnt + 1e-9)
-				
-				outlier_mask_exp = (~normal_mask_flat).unsqueeze(-1)
-				outlier_sum = (grad_weight_per_pixel * outlier_mask_exp).sum(dim=0)
-				outlier_cnt = (~normal_mask_flat).sum(dim=0, keepdim=True).unsqueeze(-1)
-				avg_outlier = outlier_sum / (outlier_cnt + 1e-9)
-				
-				normal_mean = avg_normal.abs().mean().item()
-				outlier_mean = avg_outlier.abs().mean().item()
-				ratio = normal_mean / (outlier_mean + 1e-9)
-				
-				if self.master and self.wandb_run and self.iter % 1000 == 0:
-					# 1. Gradient của output (pre_sigmoid_rec) cho normal và outlier (per-pixel, lấy trung bình theo channel)
-					grad_out_abs = grad_out_flat.abs()
-					# Tạo mask per-pixel (bất kỳ channel nào là normal thì coi pixel đó là normal, để đơn giản)
-					normal_pixel_mask = normal_mask_flat.any(dim=1)  # [L*B]
-					outlier_pixel_mask = ~normal_pixel_mask
-					grad_out_normal = grad_out_abs[normal_pixel_mask].mean().item() if normal_pixel_mask.any() else 0.0
-					grad_out_outlier = grad_out_abs[outlier_pixel_mask].mean().item() if outlier_pixel_mask.any() else 0.0
-					
-					# 2. Input magnitude (decoded_tokens) cho normal và outlier
-					input_abs = input_flat.abs()
-					input_normal = input_abs[normal_pixel_mask].mean().item() if normal_pixel_mask.any() else 0.0
-					input_outlier = input_abs[outlier_pixel_mask].mean().item() if outlier_pixel_mask.any() else 0.0
-					
-					# 4. Gradient thực của output_proj.weight (từ autograd) để kiểm tra tính đúng đắn
-					real_grad = model_ref.net_ad.output_proj.weight.grad
-					real_grad_mean = real_grad.abs().mean().item() if real_grad is not None else 0.0
-					
-					# 5. Tổng gradient weight từ normal và outlier (chưa chia trung bình) so với real_grad
-					total_grad_sum = normal_sum + outlier_sum  # [C_out, C_in]
-					total_grad_mean = total_grad_sum.abs().mean().item()
-					
-					self.wandb_run.log({
-						'Gradient/weight_output_proj_normal_mean': normal_mean,
-						'Gradient/weight_output_proj_outlier_mean': outlier_mean,
-						'Gradient/weight_output_proj_ratio': ratio,
-						'Gradient/debug_grad_out_normal_mean': grad_out_normal,
-						'Gradient/debug_grad_out_outlier_mean': grad_out_outlier,
-						'Gradient/debug_input_normal_mean': input_normal,
-						'Gradient/debug_input_outlier_mean': input_outlier,
-						'Gradient/debug_real_grad_mean': real_grad_mean,
-						'Gradient/debug_total_grad_sum_mean': total_grad_mean,
-					}, step=self.iter)
-			
-			# Log histogram của gradient output (tuỳ chọn)
-			if self.wandb_run and self.iter % 1000 == 0:
-				grad_vals = grad_store['grad'].detach().flatten().cpu().numpy()
+		# ---- Lấy mask normal/outlier ----
+		pre_orig_map = self.output_dict.get('pre_sigmoid_orig')  # [B, C_out, H, W]
+		model_ref = self._get_model_ref()
+		lower = model_ref.lower_bound.detach()[None, :, None, None]
+		upper = model_ref.upper_bound.detach()[None, :, None, None]
+		normal_mask = (pre_orig_map >= lower) & (pre_orig_map <= upper)  # [B, C_out, H, W]
+		outlier_mask = ~normal_mask
+		
+		# ---- Tính loss normal và outlier riêng (dùng MSE trên feature_rec và feature_align_out) ----
+		feature_rec = self.output_dict['feature_rec']  # [B, C_out, H, W]
+		feature_align_out = self.output_dict['feature_align']  # [B, C_out, H, W]
+		sq_diff = (feature_rec - feature_align_out) ** 2
+		
+		# Loss normal: chỉ trên normal pixels
+		normal_sum = (sq_diff * normal_mask.float()).sum()
+		normal_cnt = normal_mask.float().sum() + 1e-9
+		loss_normal = normal_sum / normal_cnt
+		# Loss outlier: chỉ trên outlier pixels
+		outlier_sum = (sq_diff * outlier_mask.float()).sum()
+		outlier_cnt = outlier_mask.float().sum() + 1e-9
+		loss_outlier = outlier_sum / outlier_cnt
+		
+		# ---- Tính gradient của weight output_proj theo loss_normal và loss_outlier ----
+		weight_param = model_ref.net_ad.output_proj.weight
+		# Tính gradient cho loss_normal (giữ graph)
+		grad_normal = torch.autograd.grad(loss_normal, weight_param, retain_graph=True, allow_unused=True)[0]
+		# Tính gradient cho loss_outlier (giữ graph)
+		grad_outlier = torch.autograd.grad(loss_outlier, weight_param, retain_graph=True, allow_unused=True)[0]
+		
+		if grad_normal is not None and grad_outlier is not None:
+			grad_normal_mean = grad_normal.abs().mean().item()
+			grad_outlier_mean = grad_outlier.abs().mean().item()
+			ratio = grad_normal_mean / (grad_outlier_mean + 1e-9)
+		else:
+			grad_normal_mean = grad_outlier_mean = ratio = 0.0
+		
+		# Log
+		if self.master and self.wandb_run and self.iter % 1000 == 0:
+			self.wandb_run.log({
+				'Gradient/weight_normal_mean': grad_normal_mean,
+				'Gradient/weight_outlier_mean': grad_outlier_mean,
+				'Gradient/weight_ratio': ratio,
+			}, step=self.iter)
+		
+		# ---- Backward tổng loss như bình thường (để cập nhật model) ----
+		self.optim.zero_grad()
+		loss_mse.backward()
+		if self.cfg.loss.clip_grad is not None:
+			dispatch_clip_grad(self.net.parameters(), value=self.cfg.loss.clip_grad)
+		self.optim.step()
+		
+		# Log histogram của gradient (lấy từ weight_param.grad sau backward)
+		if self.master and self.wandb_run and self.iter % 1000 == 0:
+			if weight_param.grad is not None:
+				grad_vals = weight_param.grad.detach().flatten().cpu().numpy()
 				self.wandb_run.log({'Gradient/histogram': wandb.Histogram(grad_vals)}, step=self.iter)
 		
 		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
