@@ -422,11 +422,6 @@ class UniADTrainer(BaseTrainer):
 					input_normal = input_abs[normal_pixel_mask].mean().item() if normal_pixel_mask.any() else 0.0
 					input_outlier = input_abs[outlier_pixel_mask].mean().item() if outlier_pixel_mask.any() else 0.0
 					
-					# 3. Tích (grad_out * input) không có outer product, tính tổng theo channels (L1)
-					prod = (grad_out_flat * input_flat).abs().sum(dim=1)  # [L*B]
-					prod_normal = prod[normal_pixel_mask].mean().item() if normal_pixel_mask.any() else 0.0
-					prod_outlier = prod[outlier_pixel_mask].mean().item() if outlier_pixel_mask.any() else 0.0
-					
 					# 4. Gradient thực của output_proj.weight (từ autograd) để kiểm tra tính đúng đắn
 					real_grad = model_ref.net_ad.output_proj.weight.grad
 					real_grad_mean = real_grad.abs().mean().item() if real_grad is not None else 0.0
@@ -443,8 +438,6 @@ class UniADTrainer(BaseTrainer):
 						'Gradient/debug_grad_out_outlier_mean': grad_out_outlier,
 						'Gradient/debug_input_normal_mean': input_normal,
 						'Gradient/debug_input_outlier_mean': input_outlier,
-						'Gradient/debug_prod_normal_mean': prod_normal,
-						'Gradient/debug_prod_outlier_mean': prod_outlier,
 						'Gradient/debug_real_grad_mean': real_grad_mean,
 						'Gradient/debug_total_grad_sum_mean': total_grad_mean,
 					}, step=self.iter)
