@@ -408,11 +408,45 @@ class UniADTrainer(BaseTrainer):
 				outlier_mean = avg_outlier.abs().mean().item()
 				ratio = normal_mean / (outlier_mean + 1e-9)
 				
-				if self.wandb_run and self.iter % 1000 == 0:
+				if self.master and self.wandb_run and self.iter % 1000 == 0:
+					# 1. Gradient của output (pre_sigmoid_rec) cho normal và outlier (per-pixel, lấy trung bình theo channel)
+					grad_out_abs = grad_out_flat.abs()
+					# Tạo mask per-pixel (bất kỳ channel nào là normal thì coi pixel đó là normal, để đơn giản)
+					normal_pixel_mask = normal_mask_flat.any(dim=1)  # [L*B]
+					outlier_pixel_mask = ~normal_pixel_mask
+					grad_out_normal = grad_out_abs[normal_pixel_mask].mean().item() if normal_pixel_mask.any() else 0.0
+					grad_out_outlier = grad_out_abs[outlier_pixel_mask].mean().item() if outlier_pixel_mask.any() else 0.0
+					
+					# 2. Input magnitude (decoded_tokens) cho normal và outlier
+					input_abs = input_flat.abs()
+					input_normal = input_abs[normal_pixel_mask].mean().item() if normal_pixel_mask.any() else 0.0
+					input_outlier = input_abs[outlier_pixel_mask].mean().item() if outlier_pixel_mask.any() else 0.0
+					
+					# 3. Tích (grad_out * input) không có outer product, tính tổng theo channels (L1)
+					prod = (grad_out_flat * input_flat).abs().sum(dim=1)  # [L*B]
+					prod_normal = prod[normal_pixel_mask].mean().item() if normal_pixel_mask.any() else 0.0
+					prod_outlier = prod[outlier_pixel_mask].mean().item() if outlier_pixel_mask.any() else 0.0
+					
+					# 4. Gradient thực của output_proj.weight (từ autograd) để kiểm tra tính đúng đắn
+					real_grad = model_ref.net_ad.output_proj.weight.grad
+					real_grad_mean = real_grad.abs().mean().item() if real_grad is not None else 0.0
+					
+					# 5. Tổng gradient weight từ normal và outlier (chưa chia trung bình) so với real_grad
+					total_grad_sum = normal_sum + outlier_sum  # [C_out, C_in]
+					total_grad_mean = total_grad_sum.abs().mean().item()
+					
 					self.wandb_run.log({
 						'Gradient/weight_output_proj_normal_mean': normal_mean,
 						'Gradient/weight_output_proj_outlier_mean': outlier_mean,
 						'Gradient/weight_output_proj_ratio': ratio,
+						'Gradient/debug_grad_out_normal_mean': grad_out_normal,
+						'Gradient/debug_grad_out_outlier_mean': grad_out_outlier,
+						'Gradient/debug_input_normal_mean': input_normal,
+						'Gradient/debug_input_outlier_mean': input_outlier,
+						'Gradient/debug_prod_normal_mean': prod_normal,
+						'Gradient/debug_prod_outlier_mean': prod_outlier,
+						'Gradient/debug_real_grad_mean': real_grad_mean,
+						'Gradient/debug_total_grad_sum_mean': total_grad_mean,
 					}, step=self.iter)
 			
 			# Log histogram của gradient output (tuỳ chọn)
