@@ -370,41 +370,59 @@ class UniADTrainer(BaseTrainer):
 		grad_store = {}
 		pre_sig_tokens = self.output_dict.get('pre_sigmoid_rec_tokens_for_grad')
 		if self.master and pre_sig_tokens is not None and pre_sig_tokens.requires_grad:
-			scaler_scale = self.loss_scaler.state_dict().get('scale', 1.0) \
-						if self.loss_scaler else 1.0
+			scaler_scale = self.loss_scaler.state_dict().get('scale', 1.0) if self.loss_scaler else 1.0
 			def save_grad(grad):
 				grad_store['grad'] = (grad / scaler_scale).detach()
 			pre_sig_tokens.register_hook(save_grad)
 		self.backward_term(loss_mse, self.optim)
+		
+		# ---------- Log gradient weight của output_proj ----------
 		if self.master and 'grad' in grad_store:
-			grad = grad_store['grad']                     # [L, B, C]
-			pre_orig_map = self.output_dict.get('pre_sigmoid_orig')  # [B, C, H, W]
-			if pre_orig_map is not None:
+			grad_out = grad_store['grad']                     # [L, B, C_out]
+			decoded_tokens = self.output_dict.get('decoded_tokens')  # [L, B, C_in]
+			pre_orig_map = self.output_dict.get('pre_sigmoid_orig')  # [B, C_out, H, W]
+			if decoded_tokens is not None and pre_orig_map is not None:
 				model_ref = self._get_model_ref()
 				lower = model_ref.lower_bound.detach()[None, :, None, None]
 				upper = model_ref.upper_bound.detach()[None, :, None, None]
-				normal_mask = (pre_orig_map >= lower) & (pre_orig_map <= upper)
-				# Reshape grad về [B, C, H, W]
-				H, W = pre_orig_map.shape[2], pre_orig_map.shape[3]
-				grad_map = grad.permute(1, 2, 0).reshape(-1, pre_orig_map.shape[1], H, W)
-				grad_abs = grad_map.abs()
-				grad_normal_mean = grad_abs[normal_mask].mean().item() if normal_mask.any() else 0.0
-				grad_outlier_mean = grad_abs[~normal_mask].mean().item() if (~normal_mask).any() else 0.0
-				ratio = grad_normal_mean / (grad_outlier_mean + 1e-9)
+				normal_mask = (pre_orig_map >= lower) & (pre_orig_map <= upper)  # [B, C_out, H, W]
+				
+				L, B, C_out = grad_out.shape
+				normal_mask_flat = normal_mask.permute(0, 2, 3, 1).reshape(-1, C_out)  # [L*B, C_out]
+				input_flat = decoded_tokens.reshape(-1, decoded_tokens.shape[-1])      # [L*B, C_in]
+				grad_out_flat = grad_out.reshape(-1, C_out)                            # [L*B, C_out]
+				
+				grad_weight_per_pixel = torch.einsum('bi,bj->bij', grad_out_flat, input_flat)  # [L*B, C_out, C_in]
+				
+				normal_mask_exp = normal_mask_flat.unsqueeze(-1)  # [L*B, C_out, 1]
+				normal_sum = (grad_weight_per_pixel * normal_mask_exp).sum(dim=0)      # [C_out, C_in]
+				normal_cnt = normal_mask_flat.sum(dim=0, keepdim=True).unsqueeze(-1)   # [1, C_out, 1]
+				avg_normal = normal_sum / (normal_cnt + 1e-9)
+				
+				outlier_mask_exp = (~normal_mask_flat).unsqueeze(-1)
+				outlier_sum = (grad_weight_per_pixel * outlier_mask_exp).sum(dim=0)
+				outlier_cnt = (~normal_mask_flat).sum(dim=0, keepdim=True).unsqueeze(-1)
+				avg_outlier = outlier_sum / (outlier_cnt + 1e-9)
+				
+				normal_mean = avg_normal.abs().mean().item()
+				outlier_mean = avg_outlier.abs().mean().item()
+				ratio = normal_mean / (outlier_mean + 1e-9)
+				
 				if self.wandb_run and self.iter % 1000 == 0:
 					self.wandb_run.log({
-						'Gradient/grad_normal_mean': grad_normal_mean,
-						'Gradient/grad_outlier_mean': grad_outlier_mean,
-						'Gradient/grad_normal_outlier_ratio': ratio,
+						'Gradient/weight_output_proj_normal_mean': normal_mean,
+						'Gradient/weight_output_proj_outlier_mean': outlier_mean,
+						'Gradient/weight_output_proj_ratio': ratio,
 					}, step=self.iter)
-
-			# Log histogram và các scalar gradient trực tiếp (không qua accumulator)
+			
+			# Log histogram của gradient output (tuỳ chọn)
 			if self.wandb_run and self.iter % 1000 == 0:
 				grad_vals = grad_store['grad'].detach().flatten().cpu().numpy()
 				self.wandb_run.log({'Gradient/histogram': wandb.Histogram(grad_vals)}, step=self.iter)
+		
 		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
-
-		# Accumulate diagnostic metrics (chỉ trên master để tiết kiệm compute)
+		
+		# Accumulate diagnostic metrics
 		if self.master:
 			diag = self._compute_diagnostic_metrics(self.output_dict)
 			for k, v in diag.items():

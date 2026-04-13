@@ -535,6 +535,7 @@ class Baseline(nn.Module):
             "post_fusion_tokens": post_fusion_tokens,   
             "post_fusion_proj":   post_fusion_proj,      # [L, B, hidden_dim]
             "pre_sigmoid_rec_tokens_for_grad": pre_sigmoid_rec,
+            "decoded_tokens": decoded_tokens,
         }
         return output_dict
 
