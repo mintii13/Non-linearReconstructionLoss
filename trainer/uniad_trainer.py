@@ -319,6 +319,18 @@ class UniADTrainer(BaseTrainer):
 			metrics['Magnitude/spatial_slots_min'] = mem_abs.min().item()
 			metrics['Magnitude/spatial_slots_mean'] = mem_abs.mean().item()
 			metrics['Magnitude/spatial_slots_max'] = mem_abs.max().item()
+		# ----- 9. Statistics of pre_sigmoid_rec and pre_sigmoid_orig (thêm vào nhóm PreSigmoid) -----
+		pre_rec = output_dict.get('pre_sigmoid_rec')   # [B, C, H, W]
+		pre_orig = output_dict.get('pre_sigmoid_orig')
+		if pre_rec is not None and pre_orig is not None:
+			rec_flat = pre_rec.flatten()
+			orig_flat = pre_orig.flatten()
+			metrics['PreSigmoid/rec_min'] = rec_flat.min().item()
+			metrics['PreSigmoid/rec_mean'] = rec_flat.mean().item()
+			metrics['PreSigmoid/rec_max'] = rec_flat.max().item()
+			metrics['PreSigmoid/orig_min'] = orig_flat.min().item()
+			metrics['PreSigmoid/orig_mean'] = orig_flat.mean().item()
+			metrics['PreSigmoid/orig_max'] = orig_flat.max().item()
 		return metrics
 
 	# ============================================================
