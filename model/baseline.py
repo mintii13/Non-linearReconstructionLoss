@@ -27,7 +27,7 @@ class ChannelMemoryModule(nn.Module):
         self.scale = 10
         
         self.memory = nn.Parameter(torch.randn(mem_dim, feature_dim))
-        nn.init.normal_(self.memory, mean=0, std=0.1)
+        nn.init.normal_(self.memory, mean=0, std=0.5)
         
         self.query_proj = nn.Linear(feature_dim, feature_dim, bias=False)
         self.key_proj = nn.Linear(feature_dim, feature_dim, bias=False)
@@ -98,7 +98,7 @@ class SpatialMemoryModule(nn.Module):
         
         # Memory shape: [mem_dim, H, W]
         self.memory = nn.Parameter(torch.randn(mem_dim, height, width))
-        nn.init.normal_(self.memory, mean=0, std=0.1)
+        nn.init.normal_(self.memory, mean=0, std=0.5)
         
         # Projections work on flattened spatial vectors (H*W)
         self.query_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
