@@ -22,7 +22,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.size = 256
         
         # === Trainer Settings ===
-        self.epoch_full = 600
+        self.epoch_full = 250
         self.warmup_epochs = 0
         self.test_per_epoch = 50
         self.test_start_epoch = 50
@@ -35,9 +35,9 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         self.metrics = [
             'mAUROC_sp_max', 'mAUROC_px',
-            # 'mAP_sp_max', 'mF1_max_sp_max',
-            # 'mAUPRO_px', 
-            # 'mAP_px', 'mF1_max_px',
+            'mAP_sp_max', 'mF1_max_sp_max',
+            'mAUPRO_px', 
+            'mAP_px', 'mF1_max_px',
         ]
 
         # ==> Data
@@ -84,7 +84,26 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
-            stats_config=self.stats_config
+            stats_config=self.stats_config,
+             memory_mode='none',           # Tùy chọn: 'channel', 'spatial', 'both', 'none'
+            fusion_mode='add_linear',         # Tùy chọn: 'concat', 'add', 'gate', 'weighted_sum'
+            mem_mask_ratio=0.8,
+            top_k=5,
+            channel_memory_size=128,
+            spatial_memory_size=128,
+            hidden_dim=512,
+            nhead=8,
+            num_encoder_layers=4,
+            num_decoder_layers=4,
+            dim_feedforward=1024,
+            dropout=0.1,
+            activation='relu',
+            normalize_before=False,
+            pos_embed_type='learned',
+            # Jitter
+            feature_jitter={'scale': 20.0, 'prob': 1.0},
+            # Initializer
+            initializer={'method': 'xavier_uniform'},
         )
 
         # Evaluator, Optimizer
@@ -128,7 +147,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         
         # === WandB ===
         self.wandb = Namespace()
-        self.wandb.enabled = True
+        self.wandb.enabled = False
         self.wandb.project = "Ader_VisA_Global" 
         self.wandb.entity = None 
         self.wandb.name = 'Baseline_Sigmoid90_600_lr0.0001_512_seede42'
