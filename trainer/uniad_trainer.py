@@ -300,10 +300,12 @@ class UniADTrainer(BaseTrainer):
 			metrics['Magnitude/pre_mem_min'] = pre_abs.min().item()
 			metrics['Magnitude/pre_mem_mean'] = pre_abs.mean().item()
 			metrics['Magnitude/pre_mem_max'] = pre_abs.max().item()
+			metrics['Magnitude/pre_mem_var'] = pre_abs.var().item()
 			
 			metrics['Magnitude/post_fusion_min'] = post_abs.min().item()
 			metrics['Magnitude/post_fusion_mean'] = post_abs.mean().item()
 			metrics['Magnitude/post_fusion_max'] = post_abs.max().item()
+			metrics['Magnitude/post_fusion_var'] = post_abs.var().item()
 		# ----- 7. Memory slots magnitude (channel memory) -----
 		if channel_res is not None:
 			mem_slots = channel_res['memory']  # [mem_dim, C]
@@ -311,6 +313,7 @@ class UniADTrainer(BaseTrainer):
 			metrics['Magnitude/channel_slots_min'] = mem_abs.min().item()
 			metrics['Magnitude/channel_slots_mean'] = mem_abs.mean().item()
 			metrics['Magnitude/channel_slots_max'] = mem_abs.max().item()
+			metrics['Magnitude/channel_slots_var'] = mem_abs.var().item()
 
 		# ----- 8. Memory slots magnitude (spatial memory) -----
 		if spatial_res is not None:
@@ -319,6 +322,7 @@ class UniADTrainer(BaseTrainer):
 			metrics['Magnitude/spatial_slots_min'] = mem_abs.min().item()
 			metrics['Magnitude/spatial_slots_mean'] = mem_abs.mean().item()
 			metrics['Magnitude/spatial_slots_max'] = mem_abs.max().item()
+			metrics['Magnitude/spatial_slots_var'] = mem_abs.var().item()
 		# ----- 9. Statistics of pre_sigmoid_rec and pre_sigmoid_orig (thêm vào nhóm PreSigmoid) -----
 		pre_rec = output_dict.get('pre_sigmoid_rec')   # [B, C, H, W]
 		pre_orig = output_dict.get('pre_sigmoid_orig')
@@ -328,9 +332,11 @@ class UniADTrainer(BaseTrainer):
 			metrics['PreSigmoid/rec_min'] = rec_flat.min().item()
 			metrics['PreSigmoid/rec_mean'] = rec_flat.mean().item()
 			metrics['PreSigmoid/rec_max'] = rec_flat.max().item()
+			metrics['PreSigmoid/rec_var'] = rec_flat.var().item()
 			metrics['PreSigmoid/orig_min'] = orig_flat.min().item()
 			metrics['PreSigmoid/orig_mean'] = orig_flat.mean().item()
 			metrics['PreSigmoid/orig_max'] = orig_flat.max().item()
+			metrics['PreSigmoid/orig_var'] = orig_flat.var().item()   
 		return metrics
 
 	# ============================================================
