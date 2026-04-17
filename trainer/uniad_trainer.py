@@ -383,32 +383,35 @@ class UniADTrainer(BaseTrainer):
 			self.imgs, _ = self.mixup_fn(self.imgs, torch.ones(self.imgs.shape[0], device=self.imgs.device))
 		with self.amp_autocast():
 			self.forward()
+			loss_mse = self.loss_terms['pixel'](self.feats_t, self.feats_s)
 		
-		# ---- Lấy các feature và mask ----
-		pre_orig_map = self.output_dict.get('pre_sigmoid_orig')  # [B, C, H, W]
-		feature_rec = self.output_dict['feature_rec']
-		feature_align_out = self.output_dict['feature_align']
+		# ---- Lấy mask normal/outlier ----
+		pre_orig_map = self.output_dict.get('pre_sigmoid_orig')  # [B, C_out, H, W]
 		model_ref = self._get_model_ref()
 		lower = model_ref.lower_bound.detach()[None, :, None, None]
 		upper = model_ref.upper_bound.detach()[None, :, None, None]
-		normal_mask = (pre_orig_map >= lower) & (pre_orig_map <= upper)
+		normal_mask = (pre_orig_map >= lower) & (pre_orig_map <= upper)  # [B, C_out, H, W]
 		outlier_mask = ~normal_mask
+		
+		# ---- Tính loss normal và outlier riêng (dùng MSE trên feature_rec và feature_align_out) ----
+		feature_rec = self.output_dict['feature_rec']  # [B, C_out, H, W]
+		feature_align_out = self.output_dict['feature_align']  # [B, C_out, H, W]
 		sq_diff = (feature_rec - feature_align_out) ** 2
 		
-		# ---- Loss chính với Gaussian weight ----
-		weight = self.output_dict.get('gaussian_weight')
-		if weight is not None:
-			loss_main = (sq_diff * weight).mean()
-		else:
-			loss_main = sq_diff.mean()
+		# Loss normal: chỉ trên normal pixels
+		normal_sum = (sq_diff * normal_mask.float()).sum()
+		normal_cnt = normal_mask.float().sum() + 1e-9
+		loss_normal = normal_sum / normal_cnt
+		# Loss outlier: chỉ trên outlier pixels
+		outlier_sum = (sq_diff * outlier_mask.float()).sum()
+		outlier_cnt = outlier_mask.float().sum() + 1e-9
+		loss_outlier = outlier_sum / outlier_cnt
 		
-		# ---- Loss normal và outlier chỉ để log gradient ----
-		loss_normal = (sq_diff * normal_mask.float()).sum() / (normal_mask.float().sum() + 1e-9)
-		loss_outlier = (sq_diff * outlier_mask.float()).sum() / (outlier_mask.float().sum() + 1e-9)
-		
-		# ---- Tính gradient cho logging ----
+		# ---- Tính gradient của weight output_proj theo loss_normal và loss_outlier ----
 		weight_param = model_ref.net_ad.output_proj.weight
+		# Tính gradient cho loss_normal (giữ graph)
 		grad_normal = torch.autograd.grad(loss_normal, weight_param, retain_graph=True, allow_unused=True)[0]
+		# Tính gradient cho loss_outlier (giữ graph)
 		grad_outlier = torch.autograd.grad(loss_outlier, weight_param, retain_graph=True, allow_unused=True)[0]
 		
 		if grad_normal is not None and grad_outlier is not None:
@@ -426,21 +429,20 @@ class UniADTrainer(BaseTrainer):
 				'Gradient/weight_ratio': ratio,
 			}, step=self.iter)
 		
-		# ---- Backward loss chính và cập nhật model ----
+		# ---- Backward tổng loss như bình thường (để cập nhật model) ----
 		self.optim.zero_grad()
-		loss_main.backward()
+		loss_mse.backward()
 		if self.cfg.loss.clip_grad is not None:
 			dispatch_clip_grad(self.net.parameters(), value=self.cfg.loss.clip_grad)
 		self.optim.step()
 		
-		# Log histogram (sau backward)
+		# Log histogram của gradient (lấy từ weight_param.grad sau backward)
 		if self.master and self.wandb_run and self.iter % 1000 == 0:
 			if weight_param.grad is not None:
 				grad_vals = weight_param.grad.detach().flatten().cpu().numpy()
 				self.wandb_run.log({'Gradient/histogram': wandb.Histogram(grad_vals)}, step=self.iter)
 		
-		# Cập nhật log term (dùng loss_main để hiển thị)
-		update_log_term(self.log_terms.get('pixel'), loss_main.detach().item(), 1, self.master)
+		update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
 		
 		# Accumulate diagnostic metrics
 		if self.master:
@@ -581,9 +583,7 @@ class UniADTrainer(BaseTrainer):
 			test_data = next(test_loader)
 			self.set_input(test_data)
 			self.forward()
-			feature_rec = self.output_dict['feature_rec']
-			feature_align_out = self.output_dict['feature_align']
-			loss_mse = ((feature_rec - feature_align_out) ** 2).mean()
+			loss_mse = self.loss_terms['pixel'](self.feats_t, self.feats_s)
 			update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
 			anomaly_map = self.pred.cpu().numpy()
 			self.imgs_mask[self.imgs_mask > 0.5], self.imgs_mask[self.imgs_mask <= 0.5] = 1, 0

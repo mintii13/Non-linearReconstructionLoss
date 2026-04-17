@@ -489,35 +489,34 @@ class Baseline(nn.Module):
         pre_sigmoid_rec  = feature_rec_tokens
         pre_sigmoid_orig = feature_norm
         if is_stats_enabled:
-            # Lấy giá trị gốc (chưa qua sigmoid)
+            # Lấy K values
+            k_value = self.k_value.to(feature_align.device)
+            
+            # Lấy hàm activation (Sigmoid)
+            activation_fn = self._get_activation_fn_from_config(self.activation_type)
+            
             pre_sigmoid_rec  = feature_rec_tokens   # [L, B, C]
             pre_sigmoid_orig = feature_norm         # [L, B, C]
 
-            # Chuyển về [B, C, H, W] cho tiện
+            feature_rec_tokens = activation_fn(pre_sigmoid_rec * k_value)
+            feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
+            
+            feature_align_act = activation_fn(pre_sigmoid_orig * k_value)
+            feature_align_out = rearrange(feature_align_act, "(h w) b c -> b c h w", h=self.feature_size[0])
+
             pre_sigmoid_rec_map  = rearrange(pre_sigmoid_rec,  "(h w) b c -> b c h w", h=self.feature_size[0])
             pre_sigmoid_orig_map = rearrange(pre_sigmoid_orig, "(h w) b c -> b c h w", h=self.feature_size[0])
 
-            # Tính trọng số Gaussian dựa trên pre_sigmoid_orig_map và lower/upper
-            lower = self.lower_bound[None, :, None, None]   # [1, C, 1, 1]
-            upper = self.upper_bound[None, :, None, None]
-            mu = (lower + upper) / 2
-            sigma = (upper - lower) / 2   # bán kính CI
-            sigma = torch.clamp(sigma, min=1e-6)            # tránh chia 0
-            weight = torch.exp(-0.5 * ((pre_sigmoid_orig_map - mu) / sigma) ** 2)
-
-            # Đặt feature_rec và feature_align_out là giá trị gốc (không qua sigmoid)
-            feature_rec = pre_sigmoid_rec_map
-            feature_align_out = pre_sigmoid_orig_map
-
         else:
-            # Trường hợp stats không enabled: giữ nguyên như cũ (không sigmoid)
-            pre_sigmoid_rec  = feature_rec_tokens
-            pre_sigmoid_orig = feature_norm
-            feature_rec = rearrange(pre_sigmoid_rec, "(h w) b c -> b c h w", h=self.feature_size[0])
-            feature_align_out = rearrange(pre_sigmoid_orig, "(h w) b c -> b c h w", h=self.feature_size[0])
-            pre_sigmoid_rec_map = feature_rec
-            pre_sigmoid_orig_map = feature_align_out
-            weight = None   # không có weight
+            # Đặt tên nhất quán — pre_sigmoid ở đây là raw feature trước MSE
+            pre_sigmoid_rec  = feature_rec_tokens   # [L, B, C]
+            pre_sigmoid_orig = feature_norm         # [L, B, C]
+
+            feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
+            feature_align_out = rearrange(feature_norm, "(h w) b c -> b c h w", h=self.feature_size[0])
+
+            pre_sigmoid_rec_map  = feature_rec        # [B, C, H, W]
+            pre_sigmoid_orig_map = feature_align_out  # [B, C, H, W]
         
         pred = torch.sqrt(torch.sum((feature_rec - feature_align_out) ** 2, dim=1, keepdim=True))
         pred = self.upsample(pred)
@@ -537,7 +536,6 @@ class Baseline(nn.Module):
             "post_fusion_proj":   post_fusion_proj,      # [L, B, hidden_dim]
             "pre_sigmoid_rec_tokens_for_grad": pre_sigmoid_rec,
             "decoded_tokens": decoded_tokens,
-            "gaussian_weight": weight,
         }
         return output_dict
 
