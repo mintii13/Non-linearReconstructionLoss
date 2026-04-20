@@ -416,6 +416,7 @@ class Baseline(nn.Module):
             feature_tokens = feature_norm
         
         feature_tokens = self.input_proj(feature_tokens)
+        tokens_after_input_proj = feature_tokens.clone()
         
         feature_tokens = feature_tokens.permute(1, 2, 0) # -> (B, C, L)
         feature_tokens = self.instance_norm(feature_tokens)
@@ -536,6 +537,7 @@ class Baseline(nn.Module):
             "post_fusion_proj":   post_fusion_proj,      # [L, B, hidden_dim]
             "pre_sigmoid_rec_tokens_for_grad": pre_sigmoid_rec,
             "decoded_tokens": decoded_tokens,
+            "tokens_after_input_proj": tokens_after_input_proj,
         }
         return output_dict
 

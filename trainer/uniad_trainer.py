@@ -337,6 +337,30 @@ class UniADTrainer(BaseTrainer):
 			metrics['PreSigmoid/orig_mean'] = orig_flat.mean().item()
 			metrics['PreSigmoid/orig_max'] = orig_flat.max().item()
 			metrics['PreSigmoid/orig_var'] = orig_flat.var().item()   
+
+		# ----- 10. Magnitude of features before/after input_proj and output_proj -----
+		pre_input = output_dict.get('pre_sigmoid_orig')          # [B, C, H, W]
+		post_input = output_dict.get('tokens_after_input_proj')  # [L, B, C]
+		pre_output = output_dict.get('decoded_tokens')           # [L, B, C]
+		post_output = output_dict.get('pre_sigmoid_rec_tokens_for_grad')  # [L, B, C]
+
+		def compute_stats(tensor, prefix):
+			if tensor is None:
+				return
+			flat = tensor.abs().flatten()
+			metrics[f'{prefix}_min'] = flat.min().item()
+			metrics[f'{prefix}_mean'] = flat.mean().item()
+			metrics[f'{prefix}_max'] = flat.max().item()
+			metrics[f'{prefix}_var'] = flat.var().item()
+
+		if pre_input is not None:
+			compute_stats(pre_input, 'ProjMagnitude/pre_input')
+		if post_input is not None:
+			compute_stats(post_input, 'ProjMagnitude/post_input')
+		if pre_output is not None:
+			compute_stats(pre_output, 'ProjMagnitude/pre_output')
+		if post_output is not None:
+			compute_stats(post_output, 'ProjMagnitude/post_output')
 		return metrics
 
 	# ============================================================
