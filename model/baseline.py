@@ -277,7 +277,7 @@ class Baseline(nn.Module):
         self.hidden_dim = hidden_dim
         self.input_proj = nn.Sequential(
             nn.Linear(inplanes[0], hidden_dim),
-            nn.Dropout(0.5)
+            nn.Dropout(0.1)
         )
         self.instance_norm = nn.InstanceNorm1d(hidden_dim, affine=False)
         initialize_from_cfg(self, initializer)
@@ -361,7 +361,7 @@ class Baseline(nn.Module):
         
         self.output_proj = nn.Sequential(
             nn.Linear(hidden_dim, inplanes[0]),
-            nn.Dropout(0.5)
+            nn.Dropout(0.1)
         )
         self.stats_config = stats_config
         self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
