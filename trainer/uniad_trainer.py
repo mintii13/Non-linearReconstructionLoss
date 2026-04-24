@@ -432,7 +432,7 @@ class UniADTrainer(BaseTrainer):
 		loss_outlier = outlier_sum / outlier_cnt
 		
 		# ---- Tính gradient của weight output_proj theo loss_normal và loss_outlier ----
-		weight_param = model_ref.net_ad.output_proj.weight
+		weight_param = model_ref.net_ad.output_proj[0].weight
 		# Tính gradient cho loss_normal (giữ graph)
 		grad_normal = torch.autograd.grad(loss_normal, weight_param, retain_graph=True, allow_unused=True)[0]
 		# Tính gradient cho loss_outlier (giữ graph)
