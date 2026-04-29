@@ -275,10 +275,7 @@ class Baseline(nn.Module):
         self.save_recon = save_recon
         self.input_channel_dim = inplanes[0]
         self.hidden_dim = hidden_dim
-        self.input_proj = nn.Sequential(
-            nn.Linear(inplanes[0], hidden_dim),
-            nn.Dropout(0.1)
-        )
+        self.input_proj = nn.Linear(inplanes[0], hidden_dim)
         self.instance_norm = nn.InstanceNorm1d(hidden_dim, affine=False)
         initialize_from_cfg(self, initializer)
         # ================= Memory Configuration =================
@@ -359,10 +356,7 @@ class Baseline(nn.Module):
         decoder_norm = nn.LayerNorm(hidden_dim)
         self.decoder = TransformerDecoder(decoder_layer, kwargs.get('num_decoder_layers', 4), decoder_norm, return_intermediate=False)
         
-        self.output_proj = nn.Sequential(
-            nn.Linear(hidden_dim, inplanes[0]),
-            nn.Dropout(0.1)
-        )
+        self.output_proj = nn.Linear(hidden_dim, inplanes[0])
         self.stats_config = stats_config
         self.activation_type = stats_config.get('activation_type', 'sigmoid').lower() if stats_config else 'sigmoid'
         self.memory_fusion_proj = None
