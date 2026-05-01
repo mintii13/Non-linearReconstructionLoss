@@ -79,20 +79,17 @@ class UniADTrainer(BaseTrainer):
 	def calculate_k_value(self):
 		if not self.master:
 			return
-
 		model_ref = self._get_model_ref()
-			
 		if not hasattr(model_ref, 'stats_config') or not model_ref.stats_config.get('enabled', False):
 			return
-
-		log_msg(self.logger, f"Started calculating K-Channel stats (CI Ratio: {model_ref.stats_config['ci_ratio']})...")
+		log_msg(self.logger, f"Started calculating global K (CI Ratio: {model_ref.stats_config['ci_ratio']})...")
 		
 		self.net.eval()
 		train_loader = iter(self.train_loader)
 		all_features = []
 		
 		with torch.no_grad():
-			for i in tqdm(range(len(self.train_loader)), desc="Calculating K"):
+			for i in tqdm(range(len(self.train_loader)), desc="Calculating global K"):
 				try:
 					data = next(train_loader)
 				except StopIteration:
@@ -101,44 +98,46 @@ class UniADTrainer(BaseTrainer):
 				feats_backbone = model_ref.net_backbone(self.imgs)
 				feats_merge = model_ref.net_merge(feats_backbone)
 				all_features.append(feats_merge.detach().cpu())
-
-		full_features = torch.cat(all_features, dim=0)
-		N, C, H, W = full_features.shape
-		feature_np = full_features.permute(1, 0, 2, 3).reshape(C, -1).numpy()
 		
+		full_features = torch.cat(all_features, dim=0)          # [N, C, H, W]
 		ci_ratio = model_ref.stats_config['ci_ratio']
 		tail = (100 - ci_ratio) / 2.0
 		numerator = 8.0 if model_ref.activation_type == 'sigmoid' else 4.8
 		
-		k_list      = []
-		lower_list  = []
-		upper_list  = []
-
+		# Tính global k từ tất cả giá trị (flatten)
+		flat_all = full_features.flatten().numpy()
+		lower_global = np.percentile(flat_all, tail)
+		upper_global = np.percentile(flat_all, 100 - tail)
+		r_global = upper_global - lower_global
+		k_global = numerator / r_global if r_global > 1e-6 else 1.0
+		
+		# Vẫn có thể tính per‑channel lower/upper cho diagnostic (không dùng cho k)
+		N, C, H, W = full_features.shape
+		feature_np = full_features.permute(1, 0, 2, 3).reshape(C, -1).numpy()
+		lower_list = []
+		upper_list = []
 		for c in range(C):
 			channel_data = feature_np[c]
 			lower = np.percentile(channel_data, tail)
 			upper = np.percentile(channel_data, 100 - tail)
-			r = upper - lower
-			k = numerator / r if r > 1e-6 else 1.0
-			k_list.append(k)
 			lower_list.append(lower)
 			upper_list.append(upper)
-			
+		
 		# Update model buffers
-		k_tensor     = torch.tensor(k_list,     dtype=torch.float32).cuda()
+		k_tensor = torch.tensor(k_global, dtype=torch.float32).cuda()
 		lower_tensor = torch.tensor(lower_list, dtype=torch.float32).cuda()
 		upper_tensor = torch.tensor(upper_list, dtype=torch.float32).cuda()
-
-		model_ref.k_value.copy_(k_tensor)
+		
+		# Gán global k vào model
+		model_ref.k_global.data.copy_(k_tensor)
 		model_ref.lower_bound.copy_(lower_tensor)
 		model_ref.upper_bound.copy_(upper_tensor)
-
+		
 		print("\n")
-		log_msg(self.logger, f"K-Values calculated. Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}")
-		print(f"K-Values calculated.** Mean K: {k_tensor.mean():.4f} | Min K: {k_tensor.min():.4f} | Max K: {k_tensor.max():.4f}", flush=True)
+		log_msg(self.logger, f"Global K-Value calculated: {k_global:.4f}")
 		log_msg(self.logger, f"Normal range (mean across channels): [{lower_tensor.mean():.4f}, {upper_tensor.mean():.4f}]")
-		print(f"Normal range (mean across channels): [{lower_tensor.mean():.4f}, {upper_tensor.mean():.4f}]", flush=True)
-
+		print(f"Global K-Value: {k_global:.4f}", flush=True)
+		
 		del all_features, full_features, feature_np
 		torch.cuda.empty_cache()
 	
@@ -510,7 +509,7 @@ class UniADTrainer(BaseTrainer):
 			self.calculate_k_value()
 			if self.cfg.dist:
 				model_ref = self._get_model_ref()
-				torch.distributed.broadcast(model_ref.k_value,     src=0)
+				torch.distributed.broadcast(model_ref.k_global, src=0)
 				torch.distributed.broadcast(model_ref.lower_bound, src=0)
 				torch.distributed.broadcast(model_ref.upper_bound, src=0)
 			self.net.train()
