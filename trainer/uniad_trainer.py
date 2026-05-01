@@ -129,7 +129,7 @@ class UniADTrainer(BaseTrainer):
 		upper_tensor = torch.tensor(upper_list, dtype=torch.float32).cuda()
 		
 		# Gán global k vào model
-		model_ref.k_global.data.copy_(k_tensor)
+		model_ref.net_ad.k_global.data.copy_(k_tensor)
 		model_ref.lower_bound.copy_(lower_tensor)
 		model_ref.upper_bound.copy_(upper_tensor)
 		
@@ -509,7 +509,7 @@ class UniADTrainer(BaseTrainer):
 			self.calculate_k_value()
 			if self.cfg.dist:
 				model_ref = self._get_model_ref()
-				torch.distributed.broadcast(model_ref.k_global, src=0)
+				torch.distributed.broadcast(model_ref.net_ad.k_global, src=0)
 				torch.distributed.broadcast(model_ref.lower_bound, src=0)
 				torch.distributed.broadcast(model_ref.upper_bound, src=0)
 			self.net.train()
