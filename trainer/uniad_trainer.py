@@ -36,7 +36,7 @@ import wandb
 import setproctitle
 from einops import rearrange
 setproctitle.setproctitle("Minh Tri is training...")
-
+from thop import profile
 
 @TRAINER.register_module
 class UniADTrainer(BaseTrainer):
@@ -64,6 +64,27 @@ class UniADTrainer(BaseTrainer):
 		# Accumulator cho diagnostic metrics (avg qua các iter trong 1 log period)
 		self._diag_accum = {}
 		self._diag_count = 0
+		if self.master and cfg.mode == 'test':
+			total_params = sum(p.numel() for p in self.net.parameters())
+			trainable_params = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+			log_msg(self.logger, f"Total parameters: {total_params:,}")
+			log_msg(self.logger, f"Trainable parameters: {trainable_params:,}")
+			
+			if profile is not None:
+				try:
+					# Lấy kích thước ảnh từ config (tuỳ chỉnh theo model của bạn)
+					img_size = getattr(cfg.data, 'img_size', 224)
+					if isinstance(img_size, int):
+						img_size = (img_size, img_size)
+					dummy_input = torch.randn(1, 3, img_size[0], img_size[1]).cuda()
+					self.net.eval()
+					flops, _ = profile(self.net, inputs=(dummy_input,), verbose=False)
+					log_msg(self.logger, f"FLOPs: {flops:,}")
+					self.net.train()
+				except Exception as e:
+					log_msg(self.logger, f"FLOPs computation failed: {e}")
+			else:
+				log_msg(self.logger, "Install thop (pip install thop) to compute FLOPs.")
 
 	# ============================================================
 	# Helper: lấy model reference (xử lý DDP wrapper)

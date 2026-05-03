@@ -80,7 +80,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.model.name = 'baseline' 
         self.model.kwargs = dict(
             pretrained=False, 
-            checkpoint_path='', 
+            checkpoint_path='runs/resfes/ckpt.pth', 
             strict=True, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
@@ -92,7 +92,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             channel_memory_size=128,
             spatial_memory_size=128,
             hidden_dim=512,
-            nhead=8,
+            nhead=16,
             num_encoder_layers=4,
             num_decoder_layers=4,
             dim_feedforward=1024,
