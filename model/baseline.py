@@ -509,20 +509,15 @@ class Baseline(nn.Module):
             pre_sigmoid_orig_map = rearrange(pre_sigmoid_orig, "(h w) b c -> b c h w", h=self.feature_size[0])
 
         else:
-             # Lấy hàm activation (Sigmoid)
-            activation_fn = self._get_activation_fn_from_config(self.activation_type)
-            
+            # Đặt tên nhất quán — pre_sigmoid ở đây là raw feature trước MSE
             pre_sigmoid_rec  = feature_rec_tokens   # [L, B, C]
             pre_sigmoid_orig = feature_norm         # [L, B, C]
 
-            feature_rec_tokens = activation_fn(pre_sigmoid_rec)
             feature_rec = rearrange(feature_rec_tokens, "(h w) b c -> b c h w", h=self.feature_size[0])
-            
-            feature_align_act = activation_fn(pre_sigmoid_orig)
-            feature_align_out = rearrange(feature_align_act, "(h w) b c -> b c h w", h=self.feature_size[0])
+            feature_align_out = rearrange(feature_norm, "(h w) b c -> b c h w", h=self.feature_size[0])
 
-            pre_sigmoid_rec_map  = rearrange(pre_sigmoid_rec,  "(h w) b c -> b c h w", h=self.feature_size[0])
-            pre_sigmoid_orig_map = rearrange(pre_sigmoid_orig, "(h w) b c -> b c h w", h=self.feature_size[0])
+            pre_sigmoid_rec_map  = feature_rec        # [B, C, H, W]
+            pre_sigmoid_orig_map = feature_align_out  # [B, C, H, W]
         
         pred = torch.sqrt(torch.sum((feature_rec - feature_align_out) ** 2, dim=1, keepdim=True))
         pred = self.upsample(pred)

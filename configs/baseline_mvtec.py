@@ -42,7 +42,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
 
         # ==> Data
         self.data.type = 'DefaultAD'
-        self.data.root = '/kaggle/working/mvtec'
+        self.data.root = 'data/mvtec'
         self.data.meta = 'meta.json'
         self.data.cls_names = []
 
@@ -88,7 +88,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             memory_mode='both',           # Tùy chọn: 'channel', 'spatial', 'both', 'none'
             fusion_mode='add_linear',         # Tùy chọn: 'concat', 'add', 'gate', 'weighted_sum'
             mem_mask_ratio=0.8,
-            top_k=5,
+            # top_k=5,
             channel_memory_size=128,
             spatial_memory_size=128,
             hidden_dim=512,

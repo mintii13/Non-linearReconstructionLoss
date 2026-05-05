@@ -632,6 +632,7 @@ class UniADTrainer(BaseTrainer):
 			update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
 			anomaly_map = self.pred.cpu().numpy()
 			self.imgs_mask[self.imgs_mask > 0.5], self.imgs_mask[self.imgs_mask <= 0.5] = 1, 0
+			print(f"pred shape: {self.pred.shape}")
 			if self.cfg.vis:
 				if self.cfg.vis_dir is not None:
 					root_out = self.cfg.vis_dir
