@@ -1,5 +1,6 @@
 import glob
 import importlib
+import os
 
 import torch
 import torch.nn as nn
@@ -74,6 +75,12 @@ def get_model(cfg_model):
 			# 			del state_dict['head.bias']
 			# load ckpt
 			if isinstance(model, nn.Module):
+				if not strict:
+					model_state = model.state_dict()
+					state_dict = {
+						k: v for k, v in state_dict.items()
+						if k in model_state and tuple(v.shape) == tuple(model_state[k].shape)
+					}
 				model.load_state_dict(state_dict, strict=False)
 			else:
 				for sub_model_name, sub_state_dict in state_dict.items():
@@ -83,4 +90,11 @@ def get_model(cfg_model):
 
 files = glob.glob('model/[!_]*.py')
 for file in files:
-	model_lib = importlib.import_module(file.split('.')[0].replace('/', '.'))
+	module_name = file.split('.')[0].replace('/', '.')
+	if module_name == 'model.invad' and os.environ.get('ADER_IMPORT_INVAD', '0') != '1':
+		print(f"[warn] Skip importing optional model module {module_name}: set ADER_IMPORT_INVAD=1 to enable")
+		continue
+	try:
+		model_lib = importlib.import_module(module_name)
+	except Exception as e:
+		print(f"[warn] Skip importing optional model module {module_name}: {type(e).__name__}")

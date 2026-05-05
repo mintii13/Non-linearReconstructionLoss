@@ -82,121 +82,124 @@ class ChannelMemoryModule(nn.Module):
 
 class SpatialMemoryModule(nn.Module):
     """
-    Spatial Memory Module - Spatial pattern processing with SSIM similarity
-    Input: (L, B, C) -> Output: (L, B, C)
-    Internal processing treats (B, C) as batch of spatial maps (H, W)
+    Convolutional spatial memory bank.
+
+    A single shared memory tensor acts as both the key bank and the value bank:
+    conv2d(input, memory) scores local patches, and conv_transpose2d(attention,
+    memory) folds the selected memory atoms back into a spatial feature map.
     """
     def __init__(self, mem_dim, height, width, mem_mask_ratio=0.6, top_k=None, **kwargs):
         super(SpatialMemoryModule, self).__init__()
-        
         self.mem_dim = mem_dim
         self.height = height
         self.width = width
-        self.spatial_dim = height * width
         self.mem_mask_ratio = mem_mask_ratio
-        self.scale = 10
-        
-        # Memory shape: [mem_dim, H, W]
-        self.memory = nn.Parameter(torch.randn(mem_dim, height, width))
-        nn.init.normal_(self.memory, mean=0, std=0.1)
-        
-        # Projections work on flattened spatial vectors (H*W)
-        self.query_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
-        self.key_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
-        self.value_proj = nn.Linear(self.spatial_dim, self.spatial_dim, bias=False)
+        self.scale = kwargs.get('scale', 10)
+        self.patch_size = kwargs.get('patch_size', 5)
+        if self.patch_size % 2 == 0:
+            self.patch_size += 1
         self.top_k = top_k
+        self.conv_memory_init = kwargs.get('conv_memory_init', 'normal')
+        self.conv_memory_pretrained_path = kwargs.get('conv_memory_pretrained_path', '')
 
-    def compute_ssim_similarity(self, query_patterns, memory_patterns):
-        # query_patterns: [N_samples, H, W] (where N_samples = B*C)
-        # memory_patterns: [mem_dim, H, W]
-        N_patterns, H, W = query_patterns.shape
-        mem_dim = memory_patterns.shape[0]
-        
-        query_flat = query_patterns.view(N_patterns, H * W)
-        memory_flat = memory_patterns.view(mem_dim, H * W)
-        
-        query_mean = torch.mean(query_flat, dim=1, keepdim=True)
-        memory_mean = torch.mean(memory_flat, dim=1, keepdim=True)
-        
-        query_var = torch.var(query_flat, dim=1, keepdim=True)
-        memory_var = torch.var(memory_flat, dim=1, keepdim=True)
-        
-        query_centered = query_flat - query_mean
-        memory_centered = memory_flat - memory_mean
-        
-        covariance = torch.mm(query_centered, memory_centered.t()) / (H * W - 1)
-        
-        c1, c2 = 0.01, 0.03
-        mean_product = torch.mm(query_mean, memory_mean.t())
-        numerator = (2 * mean_product + c1) * (2 * covariance + c2)
-        
-        mean_sum = query_mean**2 + memory_mean.t()**2
-        var_sum = query_var + memory_var.t()
-        denominator = (mean_sum + c1) * (var_sum + c2)
-        
-        ssim = numerator / (denominator + 1e-8)
-        return ssim
+        self.memory = nn.Parameter(torch.randn(mem_dim, self.patch_size, self.patch_size))
+        nn.init.normal_(self.memory, mean=0, std=0.1)
+        self._init_conv_memory_from_pretrained()
+
+    def _init_conv_memory_from_pretrained(self):
+        if self.conv_memory_init != 'pretrained' or not self.conv_memory_pretrained_path:
+            return
+        if not os.path.exists(self.conv_memory_pretrained_path):
+            print(f"-> Spatial Conv Memory: pretrained path not found, use normal init: {self.conv_memory_pretrained_path}")
+            return
+        try:
+            ckpt = torch.load(self.conv_memory_pretrained_path, map_location='cpu', weights_only=False)
+            state_dict = ckpt.get('state_dict', ckpt.get('model', ckpt))
+            candidates = []
+            for key, weight in state_dict.items():
+                if not isinstance(weight, torch.Tensor) or weight.dim() != 4:
+                    continue
+                if weight.shape[-1] < 3 or weight.shape[-2] < 3:
+                    continue
+                if 'conv' in key or 'downsample' in key:
+                    candidates.append(weight.float())
+            if not candidates:
+                print("-> Spatial Conv Memory: no Conv2d weights found, use normal init")
+                return
+
+            kernels = []
+            for weight in candidates:
+                # [O, I, Kh, Kw] -> [O*I, 1, Kh, Kw], use channel-wise
+                # pretrained filters as local memory atoms.
+                weight = weight.reshape(-1, 1, weight.shape[-2], weight.shape[-1])
+                if weight.shape[-1] != self.patch_size or weight.shape[-2] != self.patch_size:
+                    weight = F.interpolate(
+                        weight,
+                        size=(self.patch_size, self.patch_size),
+                        mode='bilinear',
+                        align_corners=False,
+                    )
+                kernels.append(weight[:, 0])
+
+            kernels = torch.cat(kernels, dim=0)
+            if kernels.shape[0] < self.mem_dim:
+                repeat = math.ceil(self.mem_dim / kernels.shape[0])
+                kernels = kernels.repeat(repeat, 1, 1)
+            kernels = kernels[:self.mem_dim]
+            kernels = kernels - kernels.mean(dim=(1, 2), keepdim=True)
+            kernels = kernels / (kernels.flatten(1).std(dim=1).view(-1, 1, 1) + 1e-6)
+            kernels = kernels * 0.1
+            with torch.no_grad():
+                self.memory.copy_(kernels)
+            print(f"-> Spatial Conv Memory: initialized from {self.conv_memory_pretrained_path}")
+        except Exception as e:
+            print(f"-> Spatial Conv Memory: pretrained init failed ({type(e).__name__}), use normal init")
 
     def forward(self, input_tokens):
-        # input_tokens shape: [L, B, C] where L = H*W
+        # input_tokens: [L, B, C], L = H*W.
         L, batch_size, feature_dim = input_tokens.shape
         H, W = self.height, self.width
-        
-        # --- FIX: Permute to process spatial maps properly ---
-        # We want to treat each Channel of each Batch as a spatial map (H, W).
-        # Target shape for projection: [B * C, H*W]
-        
-        # 1. Permute to [B, C, L]
-        input_permuted = input_tokens.permute(1, 2, 0).contiguous() 
-        
-        # 2. Reshape to [B * C, H*W] (Flatten spatial)
-        input_flat = input_permuted.view(batch_size * feature_dim, H * W)
-        
-        # 3. Project to Queries
-        queries_flat = self.query_proj(input_flat)
-        queries_spatial = queries_flat.view(batch_size * feature_dim, H, W)
-        
-        # 4. Prepare Memory Keys/Values
-        memory_flat = self.memory.view(self.mem_dim, H * W)
-        keys_flat = self.key_proj(memory_flat)
-        values_flat = self.value_proj(memory_flat)
-        keys_spatial = keys_flat.view(self.mem_dim, H, W)
-        
-        # 5. Compute SSIM
-        ssim_similarity = self.compute_ssim_similarity(queries_spatial, keys_spatial)
-        
+        k = self.patch_size
+        pad = k // 2
+
+        input_maps = input_tokens.permute(1, 2, 0).contiguous().view(batch_size * feature_dim, 1, H, W)
+        memory_weight = self.memory.unsqueeze(1)
+        key_weight = F.normalize(memory_weight.flatten(1), p=2, dim=1).view_as(memory_weight)
+
+        attention_scores_map = F.conv2d(input_maps, key_weight, padding=pad) / math.sqrt(k * k)
+
         if self.training and self.mem_mask_ratio > 0:
             num_masked = int(self.mem_dim * self.mem_mask_ratio)
-            mask_indices = torch.randperm(self.mem_dim, device=ssim_similarity.device)[:num_masked]
-            ssim_similarity[:, mask_indices] = float('-inf')
+            mask_indices = torch.randperm(self.mem_dim, device=attention_scores_map.device)[:num_masked]
+            attention_scores_map[:, mask_indices, :, :] = float('-inf')
 
-        attention_scores = ssim_similarity * self.scale  # tính trước
-
-        top_k = getattr(self, 'top_k', None)
-        if not self.training and top_k is not None:
-            k = min(top_k, self.mem_dim)
-            topk_vals, topk_idx = torch.topk(attention_scores, k, dim=1)
-            mask = torch.full_like(attention_scores, float('-inf'))
+        if not self.training and self.top_k is not None:
+            top_k = min(self.top_k, self.mem_dim)
+            topk_vals, topk_idx = torch.topk(attention_scores_map, top_k, dim=1)
+            mask = torch.full_like(attention_scores_map, float('-inf'))
             mask.scatter_(1, topk_idx, topk_vals)
-            attention_scores = mask
+            attention_scores_map = mask
 
-        att_weight = F.softmax(attention_scores, dim=1)
-        
-        # 6. Retrieve Values: [B*C, mem_dim] x [mem_dim, H*W] -> [B*C, H*W]
-        output_flat = torch.mm(att_weight, values_flat)
-        
-        # 7. Reshape and Permute back to [L, B, C]
-        # [B*C, H*W] -> [B, C, L]
-        output_reshaped = output_flat.view(batch_size, feature_dim, L)
-        
-        # [B, C, L] -> [L, B, C]
-        output_tokens = output_reshaped.permute(2, 0, 1).contiguous()
-        
+        att_weight_map = F.softmax(attention_scores_map * self.scale, dim=1)
+        output_sum = F.conv_transpose2d(att_weight_map, memory_weight, padding=pad)
+        norm = F.conv_transpose2d(
+            torch.ones(input_maps.shape[0], 1, H, W, device=input_maps.device, dtype=input_maps.dtype),
+            torch.ones(1, 1, k, k, device=input_maps.device, dtype=input_maps.dtype),
+            padding=pad,
+        ).clamp_min(1e-6)
+        output_maps = output_sum / norm
+
+        output_tokens = output_maps.view(batch_size, feature_dim, L).permute(2, 0, 1).contiguous()
         return {
             'output': output_tokens,
-            'att_weight': att_weight,
-            'ssim_similarity': ssim_similarity,
-            'memory': self.memory
+            'att_weight': att_weight_map.flatten(2).mean(dim=2),
+            'att_weight_map': att_weight_map,
+            'attention_scores': attention_scores_map.flatten(2).mean(dim=2),
+            'ssim_similarity': attention_scores_map.flatten(2).mean(dim=2),
+            'attention_scores_map': attention_scores_map,
+            'memory': self.memory,
+            'memory_type': 'conv',
+            'patch_size': self.patch_size,
         }
 
 
@@ -303,9 +306,12 @@ class Baseline(nn.Module):
                 mem_dim=kwargs.get('spatial_memory_size', 256),
                 height=feature_size[0], width=feature_size[1],
                 mem_mask_ratio=self.mem_mask_ratio,
-                top_k=kwargs.get('top_k', None)
+                top_k=kwargs.get('top_k', None),
+                patch_size=kwargs.get('spatial_patch_size', 5),
+                conv_memory_init=kwargs.get('conv_memory_init', 'normal'),
+                conv_memory_pretrained_path=kwargs.get('conv_memory_pretrained_path', 'model/pretrain/wide_resnet50_2-95faca4d.pth'),
             )
-            print('-> Baseline: Initialized Spatial Memory, mask ratio:', self.mem_mask_ratio)
+            print('-> Baseline: Initialized Conv Spatial Memory, mask ratio:', self.mem_mask_ratio)
         
         # ================= Fusion Layer =================
         fusion_input_dim = hidden_dim

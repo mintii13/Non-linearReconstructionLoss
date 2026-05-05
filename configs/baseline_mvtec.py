@@ -81,7 +81,7 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
         self.model.kwargs = dict(
             pretrained=False, 
             checkpoint_path='runs/resfes/ckpt.pth', 
-            strict=True, 
+            strict=False, 
             model_backbone=self.model_backbone,
             model_decoder=self.model_decoder, 
             stats_config=self.stats_config,
@@ -91,6 +91,11 @@ class cfg(cfg_common, cfg_dataset_default, cfg_model_uniad):
             # top_k=5,
             channel_memory_size=128,
             spatial_memory_size=128,
+            # Spatial memory is now a shared-weight convolutional memory bank.
+            # The same memory atom scores local patches and reconstructs them.
+            spatial_patch_size=5,
+            conv_memory_init='normal',
+            conv_memory_pretrained_path='model/pretrain/wide_resnet50_2-95faca4d.pth',
             hidden_dim=512,
             nhead=16,
             num_encoder_layers=4,
