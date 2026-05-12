@@ -121,6 +121,9 @@ class UniADTrainer(BaseTrainer):
 				self.set_input(data)
 				feats_backbone = model_ref.net_backbone(self.imgs)
 				feats_merge = model_ref.net_merge(feats_backbone)
+				feats_norm = feats_merge.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
+				feats_norm = model_ref.feature_norm(feats_norm)   
+				feats_merge = feats_norm.permute(0, 3, 1, 2)
 				all_features.append(feats_merge.detach().cpu())
 
 		full_features = torch.cat(all_features, dim=0)
