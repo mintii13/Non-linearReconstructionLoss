@@ -747,6 +747,7 @@ class BaselineWrapper(nn.Module):
             instrides=[2, 4, 8, 16],
             outstrides=[16]
         )
+        self.feature_norm = nn.LayerNorm(model_decoder['outplanes'][0], elementwise_affine=False)
         self.net_ad = Baseline(
             inplanes=model_decoder['outplanes'],
             instrides=model_decoder['instrides'],
@@ -811,7 +812,12 @@ class BaselineWrapper(nn.Module):
     def forward(self, imgs):
         feats_backbone = self.net_backbone(imgs)
         feats_merge = self.net_merge(feats_backbone)
-        feats_merge = feats_merge.detach()
+        # 1. Permute
+        feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
+        # 2. Norm
+        feats_norm = self.feature_norm(feats_norm)
+        # 3. Permute back
+        feats_merge = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
         output_dict = self.net_ad(feats_merge)
         
         # Tách dict thành tuple để trả về cho Trainer
