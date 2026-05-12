@@ -45,9 +45,9 @@ class ChannelMemoryModule(nn.Module):
         keys = self.key_proj(self.memory)
         values = self.value_proj(self.memory)
         
-        # Áp dụng L2 Norm để biến Dot-Product thành Cosine
-        queries_norm = F.normalize(queries, p=2, dim=-1)
-        keys_norm = F.normalize(keys, p=2, dim=-1)
+        # # Áp dụng L2 Norm để biến Dot-Product thành Cosine
+        # queries_norm = F.normalize(queries, p=2, dim=-1)
+        # keys_norm = F.normalize(keys, p=2, dim=-1)
         
         # Cosine Similarity (Khoảng giá trị [-1, 1])
         attention_scores = torch.mm(queries_norm, keys_norm.t())
@@ -164,7 +164,7 @@ class SpatialMemoryModule(nn.Module):
 
         input_maps = input_tokens.permute(1, 2, 0).contiguous().view(batch_size * feature_dim, 1, H, W)
         memory_weight = self.memory.unsqueeze(1)
-        key_weight = F.normalize(memory_weight.flatten(1), p=2, dim=1).view_as(memory_weight)
+        # key_weight = F.normalize(memory_weight.flatten(1), p=2, dim=1).view_as(memory_weight)
 
         attention_scores_map = F.conv2d(input_maps, key_weight, padding=pad) / math.sqrt(k * k)
 
