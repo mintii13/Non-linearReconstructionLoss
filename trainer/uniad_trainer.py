@@ -27,7 +27,7 @@ except:
 	from timm.layers.norm_act import convert_sync_batchnorm as ApexSyncBN
 from timm.layers.norm_act import convert_sync_batchnorm as TIMMSyncBN
 from timm.utils import dispatch_clip_grad
-
+import torch.nn.functional as F
 from ._base_trainer import BaseTrainer
 from . import TRAINER
 from util.vis import vis_rgb_gt_amp
@@ -78,7 +78,7 @@ class UniADTrainer(BaseTrainer):
 		self.bs = self.imgs.shape[0]
 	
 	def forward(self):
-		self.feats_t, self.feats_s, self.pred = self.net(self.imgs)
+		self.feats_t, self.feats_s, self.pred, self.feats_pre = self.net(self.imgs)
 
 	def backward_term(self, loss_term, optim):
 		optim.zero_grad()
@@ -197,131 +197,132 @@ class UniADTrainer(BaseTrainer):
 			if os.path.exists(self.tmp_dir):
 				shutil.rmtree(self.tmp_dir)
 			os.makedirs(self.tmp_dir, exist_ok=True)
+		
 		self.reset(isTrain=False)
 		imgs_masks, anomaly_maps, cls_names, anomalys = [], [], [], []
 		batch_idx = 0
 		test_length = self.cfg.data.test_size
 		test_loader = iter(self.test_loader)
+
+		# 1. Khởi tạo lưu trữ magnitude theo từng class
+		mag_stats_per_class = {
+			c: {
+				'pre_n': [], 'pre_a': [], 
+				'post_n': [], 'post_a': [],
+				'recon_n': [], 'recon_a': []
+			} 
+			for c in self.cls_names
+		}
+
 		while batch_idx < test_length:
-			# if batch_idx == 10:
-			# 	break
 			t1 = get_timepc()
 			batch_idx += 1
 			test_data = next(test_loader)
 			self.set_input(test_data)
-			self.forward()
+			
+			# 2. CHỈ GỌI forward 1 lần duy nhất
+			self.forward() 
+
+			# 3. Tính Magnitude Map
+			mag_pre = torch.norm(self.feats_pre, p=2, dim=1, keepdim=True)
+			mag_post = torch.norm(self.feats_t, p=2, dim=1, keepdim=True)
+			mag_recon = torch.norm(self.feats_s, p=2, dim=1, keepdim=True) # Thêm dòng này
+			mask_resized = F.interpolate(self.imgs_mask, size=mag_pre.shape[-2:], mode='nearest')
+
+			# 4. Phân loại vùng
+			for i in range(self.bs):
+				c_name = self.cls_name[i]
+				m_mask = mask_resized[i]
+				
+				if (m_mask == 0).any():
+					mag_stats_per_class[c_name]['pre_n'].append(mag_pre[i][m_mask == 0].mean().item())
+					mag_stats_per_class[c_name]['post_n'].append(mag_post[i][m_mask == 0].mean().item())
+					mag_stats_per_class[c_name]['recon_n'].append(mag_recon[i][m_mask == 0].mean().item())
+				
+				if (m_mask == 1).any():
+					mag_stats_per_class[c_name]['pre_a'].append(mag_pre[i][m_mask == 1].mean().item())
+					mag_stats_per_class[c_name]['post_a'].append(mag_post[i][m_mask == 1].mean().item())
+					mag_stats_per_class[c_name]['recon_a'].append(mag_recon[i][m_mask == 1].mean().item())
+
+			# Log loss và thu thập dữ liệu metrics
 			loss_mse = self.loss_terms['pixel'](self.feats_t, self.feats_s)
 			update_log_term(self.log_terms.get('pixel'), reduce_tensor(loss_mse, self.world_size).clone().detach().item(), 1, self.master)
-			# get anomaly maps
-			# anomaly_map, _ = self.evaluator.cal_anomaly_map(self.feats_t, self.feats_s, self.imgs.shape[-1], amap_mode='add', gaussian_sigma=4)
+			
 			anomaly_map = self.pred.cpu().numpy()
 			self.imgs_mask[self.imgs_mask > 0.5], self.imgs_mask[self.imgs_mask <= 0.5] = 1, 0
+			
 			if self.cfg.vis:
-				if self.cfg.vis_dir is not None:
-					root_out = self.cfg.vis_dir
-				else:
-					root_out = self.writer.logdir
+				root_out = self.cfg.vis_dir if self.cfg.vis_dir is not None else self.writer.logdir
 				vis_rgb_gt_amp(self.img_path, self.imgs, self.imgs_mask.cpu().numpy().astype(int), anomaly_map, self.cfg.model.name, root_out, self.cfg.data.root.split('/')[1])
+			
 			imgs_masks.append(self.imgs_mask.cpu().numpy().astype(int))
 			anomaly_maps.append(anomaly_map)
 			cls_names.append(np.array(self.cls_name))
 			anomalys.append(self.anomaly.cpu().numpy().astype(int))
+			
 			t2 = get_timepc()
 			update_log_term(self.log_terms.get('batch_t'), t2 - t1, 1, self.master)
-			print(f'\r{batch_idx}/{test_length}', end='') if self.master else None
-			# ---------- log ----------
-			if self.master:
-				if batch_idx % self.cfg.logging.test_log_per == 0 or batch_idx == test_length:
-					msg = able(self.progress.get_msg(batch_idx, test_length, 0, 0, prefix=f'Test'), self.master, None)
-					log_msg(self.logger, msg)
-		# merge results
-		if self.cfg.dist:
-			results = dict(imgs_masks=imgs_masks, anomaly_maps=anomaly_maps, cls_names=cls_names, anomalys=anomalys)
-			torch.save(results, f'{self.tmp_dir}/{self.rank}.pth', _use_new_zipfile_serialization=False)
-			if self.master:
-				results = dict(imgs_masks=[], anomaly_maps=[], cls_names=[], anomalys=[])
-				valid_results = False
-				while not valid_results:
-					results_files = glob.glob(f'{self.tmp_dir}/*.pth')
-					if len(results_files) != self.cfg.world_size:
-						time.sleep(1)
-					else:
-						idx_result = 0
-						while idx_result < self.cfg.world_size:
-							results_file = results_files[idx_result]
-							try:
-								result = torch.load(results_file)
-								for k, v in result.items():
-									results[k].extend(v)
-								idx_result += 1
-							except:
-								time.sleep(1)
-						valid_results = True
-		else:
-			results = dict(imgs_masks=imgs_masks, anomaly_maps=anomaly_maps, cls_names=cls_names, anomalys=anomalys)
-			
+			if self.master and batch_idx % self.cfg.logging.test_log_per == 0:
+				log_msg(self.logger, able(self.progress.get_msg(batch_idx, test_length, 0, 0, prefix=f'Test'), self.master, None))
+
+		# --- PHẦN IN KẾT QUẢ CUỐI CÙNG ---
 		if self.master:
-			results = {k: np.concatenate(v, axis=0) for k, v in results.items()}
-			msg = {}
-			wandb_metric_log = {} # Dictionary chỉ chứa Avg metrics cho WandB
-			
-			# --- CHỈ TÍNH VÀ LOG AVG ---
-			
-			# Bước 1: Tính toán và lưu trữ các metric cho từng class (vẫn cần để tính Avg)
+			results = {k: np.concatenate(v, axis=0) for k, v in dict(imgs_masks=imgs_masks, anomaly_maps=anomaly_maps, cls_names=cls_names, anomalys=anomalys).items()}
+			msg = {} # Dùng chung 1 biến msg cho tất cả
 			all_class_metrics = {metric: [] for metric in self.metrics}
-			
+
 			for idx, cls_name in enumerate(self.cls_names):
+				# A. Magnitude Analysis
+				ms = mag_stats_per_class[cls_name]
+				avg_pre_n = np.mean(ms['pre_n']) if ms['pre_n'] else 0
+				avg_pre_a = np.mean(ms['pre_a']) if ms['pre_a'] else 0
+				avg_post_n = np.mean(ms['post_n']) if ms['post_n'] else 0
+				avg_post_a = np.mean(ms['post_a']) if ms['post_a'] else 0
+				avg_recon_n = np.mean(ms['recon_n']) if ms['recon_n'] else 0
+				avg_recon_a = np.mean(ms['recon_a']) if ms['recon_a'] else 0
+
+				# In bảng phân tích độ lớn feature cho từng class
+				mag_table = [
+					["Stage", "Normal Mag", "Abnormal Mag", "Ratio (A/N)"],
+					["Pre-Norm", f"{avg_pre_n:.4f}", f"{avg_pre_a:.4f}", f"{avg_pre_a/avg_pre_n:.2f}x" if avg_pre_n > 0 else "N/A"],
+					["Post-Norm", f"{avg_post_n:.4f}", f"{avg_post_a:.4f}", f"{avg_post_a/avg_post_n:.2f}x" if avg_post_n > 0 else "N/A"],
+					["Reconstruction", f"{avg_recon_n:.4f}", f"{avg_recon_a:.4f}", f"{avg_recon_a/avg_recon_n:.2f}x" if avg_recon_n > 0 else "N/A"]
+				]
+				log_msg(self.logger, f"\n[Magnitude Analysis: {cls_name.upper()}]")
+				print(tabulate.tabulate(mag_table, headers="firstrow", tablefmt="fancy_grid"))
+
+				# B. AUROC/Metrics
 				metric_results = self.evaluator.run(results, cls_name, self.logger)
-				
 				msg['Name'] = msg.get('Name', [])
 				msg['Name'].append(cls_name)
 				
-				# Biến cờ cho biết đây có phải là lớp cuối cùng không (để tính Avg trong tabulate)
 				avg_act = True if len(self.cls_names) > 1 and idx == len(self.cls_names) - 1 else False
-				
-				msg['Name'].append('Avg') if avg_act else None
-				
+				if avg_act: msg['Name'].append('Avg')
+
 				for metric in self.metrics:
 					metric_result = metric_results[metric] * 100
-					
-					# Cập nhật metric recorder (cần cho (Max))
 					self.metric_recorder[f'{metric}_{cls_name}'].append(metric_result)
-					
-					# Lưu trữ giá trị để tính trung bình cuối cùng
 					all_class_metrics[metric].append(metric_result) 
 					
 					max_metric = max(self.metric_recorder[f'{metric}_{cls_name}'])
 					max_metric_idx = self.metric_recorder[f'{metric}_{cls_name}'].index(max_metric) + 1
 					
-					# Cập nhật thông báo (msg) cho từng class (vẫn cần để in ra bảng)
 					msg[metric] = msg.get(metric, [])
 					msg[metric].append(metric_result)
 					msg[f'{metric} (Max)'] = msg.get(f'{metric} (Max)', [])
 					msg[f'{metric} (Max)'].append(f'{max_metric:.3f} ({max_metric_idx:<3d} epoch)')
 					
 					if avg_act:
-						# Tính trung bình (Avg)
 						metric_result_avg = sum(all_class_metrics[metric]) / len(all_class_metrics[metric])
-						
-						# Cập nhật metric recorder Avg
 						self.metric_recorder[f'{metric}_Avg'].append(metric_result_avg)
-						
-						# === LOG WANDB (CHỈ AVG) ===
-						wandb_metric_log[f'Test/Avg/{metric}'] = metric_result_avg / 100.0 # Log giá trị 0-1
-						
-						# Cập nhật thông báo (msg) cho hàng Avg
-						max_metric = max(self.metric_recorder[f'{metric}_Avg'])
-						max_metric_idx = self.metric_recorder[f'{metric}_Avg'].index(max_metric) + 1
 						msg[metric].append(metric_result_avg)
-						msg[f'{metric} (Max)'].append(f'{max_metric:.3f} ({max_metric_idx:<3d} epoch)')
+						
+						max_metric_avg = max(self.metric_recorder[f'{metric}_Avg'])
+						max_idx_avg = self.metric_recorder[f'{metric}_Avg'].index(max_metric_avg) + 1
+						msg[f'{metric} (Max)'].append(f'{max_metric_avg:.3f} ({max_idx_avg:<3d} epoch)')
+						
+						if self.wandb_run:
+							self.wandb_run.log({f'Test/Avg/{metric}': metric_result_avg / 100.0, 'epoch': self.epoch})
 			
-			# In ra bảng tabulate
-			msg = tabulate.tabulate(msg, headers='keys', tablefmt="pipe", floatfmt='.3f', numalign="center", stralign="center", )
-			log_msg(self.logger, f'\n{msg}')
-			epoch_msg = f"\n==================== TEST RESULTS (EPOCH {self.epoch}) ===================="
-			print(epoch_msg, flush=True)
-			print(f'\n{msg}', flush=True)
-			# --- GỬI LOG AVG LÊN WANDB ---
-			if self.wandb_run:
-				wandb_metric_log['epoch'] = self.epoch
-				self.wandb_run.log(wandb_metric_log)
+			final_msg = tabulate.tabulate(msg, headers='keys', tablefmt="pipe", floatfmt='.3f', numalign="center", stralign="center")
+			log_msg(self.logger, f'\n{final_msg}')

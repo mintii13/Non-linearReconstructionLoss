@@ -386,23 +386,22 @@ class BaselineWrapper(nn.Module):
 
     def forward(self, imgs):
         feats_backbone = self.net_backbone(imgs)
-        feats_merge = self.net_merge(feats_backbone)
-        # 1. Permute
-        feats_norm = feats_merge.permute(0, 2, 3, 1) # B, H, W, C
-        # 2. Norm
-        feats_norm = self.feature_norm(feats_norm)
-        # 3. Permute back
-        feats_merge = feats_norm.permute(0, 3, 1, 2) # B, C, H, W
-        feats_norm = feats_merge.detach()
+        feats_merge = self.net_merge(feats_backbone) # <--- ĐÂY LÀ PRE-NORM
         
-        output_dict = self.net_ad(feats_norm)
+        # Logic Norm hiện tại của bạn
+        feats_p = feats_merge.permute(0, 2, 3, 1) 
+        feats_normed = self.feature_norm(feats_p)
+        feats_post_norm = feats_normed.permute(0, 3, 1, 2) # <--- ĐÂY LÀ POST-NORM
         
-        # Tách dict thành tuple để trả về cho Trainer
-        feature_align = output_dict['feature_align']
+        feats_norm_detach = feats_post_norm.detach()
+        output_dict = self.net_ad(feats_norm_detach)
+        
+        feature_align = output_dict['feature_align'] # Chính là feats_post_norm
         feature_rec = output_dict['feature_rec']
         pred = output_dict['pred']
         
-        return feature_align, feature_rec, pred
+        # Trả về thêm feats_merge để trainer sử dụng
+        return feature_align, feature_rec, pred, feats_merge
 
 # ==========================================
 # 5. Register Module
