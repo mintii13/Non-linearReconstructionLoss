@@ -390,8 +390,8 @@ class BaselineWrapper(nn.Module):
         
         # Logic Norm hiện tại của bạn
         feats_p = feats_merge.permute(0, 2, 3, 1) 
-        feats_normed = self.feature_norm(feats_p)
-        feats_post_norm = feats_normed.permute(0, 3, 1, 2) # <--- ĐÂY LÀ POST-NORM
+        # feats_normed = self.feature_norm(feats_p)
+        feats_post_norm = feats_p.permute(0, 3, 1, 2) # <--- ĐÂY LÀ POST-NORM
         
         feats_norm_detach = feats_post_norm.detach()
         output_dict = self.net_ad(feats_norm_detach)
