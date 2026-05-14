@@ -386,36 +386,22 @@ class BaselineWrapper(nn.Module):
 
     def forward(self, imgs):
         feats_backbone = self.net_backbone(imgs)
-        feats_merge = self.net_merge(feats_backbone) 
+        feats_merge = self.net_merge(feats_backbone) # <--- ĐÂY LÀ PRE-NORM
         
-        # --- THAY ĐỔI: Không Norm ở đây nữa, đẩy thẳng feats_merge vào net_ad ---
-        # feats_p = feats_merge.permute(0, 2, 3, 1) 
-        # feats_normed = self.feature_norm(feats_p)
-        # feats_post_norm = feats_normed.permute(0, 3, 1, 2) 
-        # feats_norm_detach = feats_post_norm.detach()
+        # Logic Norm hiện tại của bạn
+        feats_p = feats_merge.permute(0, 2, 3, 1) 
+        feats_normed = self.feature_norm(feats_p)
+        feats_post_norm = feats_normed.permute(0, 3, 1, 2) # <--- ĐÂY LÀ POST-NORM
         
-        # Đưa feature thô (vẫn giữ nguyên magnitude) vào luồng AD
-        output_dict = self.net_ad(feats_merge)
+        feats_norm_detach = feats_post_norm.detach()
+        output_dict = self.net_ad(feats_norm_detach)
         
-        feature_align_raw = output_dict['feature_align'] # Đây chính là feats_merge
-        feature_rec_raw = output_dict['feature_rec']     # Output thô từ decoder
+        feature_align = output_dict['feature_align'] # Chính là feats_post_norm
+        feature_rec = output_dict['feature_rec']
+        pred = output_dict['pred']
         
-        # --- THAY ĐỔI: Thực hiện Feature Normalize cho cả Target và Rec trước khi tính MSE ---
-        
-        # 1. Normalize Target (Align)
-        f_a = feature_align_raw.permute(0, 2, 3, 1) # B, H, W, C
-        f_a = self.feature_norm(f_a).permute(0, 3, 1, 2) # B, C, H, W
-        
-        # 2. Normalize Reconstruction (Rec)
-        f_r = feature_rec_raw.permute(0, 2, 3, 1) # B, H, W, C
-        f_r = self.feature_norm(f_r).permute(0, 3, 1, 2) # B, C, H, W
-        
-        # 3. Tính lại prediction map (pred) dựa trên các feature đã được normalize
-        pred = torch.sqrt(torch.sum((f_r - f_a) ** 2, dim=1, keepdim=True))
-        pred = self.net_ad.upsample(pred) # Dùng lại layer upsample của net_ad
-        
-        # Trả về các feature đã được normalize để Trainer tính Loss Pixel chính xác
-        return f_a, f_r, pred, feats_merge
+        # Trả về thêm feats_merge để trainer sử dụng
+        return feature_align, feature_rec, pred, feats_merge
 
 # ==========================================
 # 5. Register Module
