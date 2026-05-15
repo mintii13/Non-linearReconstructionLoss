@@ -292,37 +292,54 @@ class UniADTrainer(BaseTrainer):
 				print(tabulate.tabulate(mag_table, headers="firstrow", tablefmt="fancy_grid"))
 
 				# B. AUROC/Metrics
-				metric_results = self.evaluator.run(results, cls_name, self.logger)
-				msg['Name'] = msg.get('Name', [])
-				msg['Name'].append(cls_name)
-				
-				avg_act = True if len(self.cls_names) > 1 and idx == len(self.cls_names) - 1 else False
-				if avg_act: msg['Name'].append('Avg')
+                metric_results = self.evaluator.run(results, cls_name, self.logger)
+                msg['Name'] = msg.get('Name', [])
+                msg['Name'].append(cls_name)
+                
+                avg_act = True if len(self.cls_names) > 1 and idx == len(self.cls_names) - 1 else False
+                
+                current_row_metrics = []
 
-				for metric in self.metrics:
-					metric_result = metric_results[metric] * 100
-					self.metric_recorder[f'{metric}_{cls_name}'].append(metric_result)
-					all_class_metrics[metric].append(metric_result) 
-					
-					max_metric = max(self.metric_recorder[f'{metric}_{cls_name}'])
-					max_metric_idx = self.metric_recorder[f'{metric}_{cls_name}'].index(max_metric) + 1
-					
-					msg[metric] = msg.get(metric, [])
-					msg[metric].append(metric_result)
-					msg[f'{metric} (Max)'] = msg.get(f'{metric} (Max)', [])
-					msg[f'{metric} (Max)'].append(f'{max_metric:.3f} ({max_metric_idx:<3d} epoch)')
-					
-					if avg_act:
-						metric_result_avg = sum(all_class_metrics[metric]) / len(all_class_metrics[metric])
-						self.metric_recorder[f'{metric}_Avg'].append(metric_result_avg)
-						msg[metric].append(metric_result_avg)
-						
-						max_metric_avg = max(self.metric_recorder[f'{metric}_Avg'])
-						max_idx_avg = self.metric_recorder[f'{metric}_Avg'].index(max_metric_avg) + 1
-						msg[f'{metric} (Max)'].append(f'{max_metric_avg:.3f} ({max_idx_avg:<3d} epoch)')
-						
-						if self.wandb_run:
-							self.wandb_run.log({f'Test/Avg/{metric}': metric_result_avg / 100.0, 'epoch': self.epoch})
+                for metric in self.metrics:
+                    metric_result = metric_results[metric] * 100
+                    current_row_metrics.append(metric_result)
+                    self.metric_recorder[f'{metric}_{cls_name}'].append(metric_result)
+                    all_class_metrics[metric].append(metric_result) 
+                    
+                    max_metric = max(self.metric_recorder[f'{metric}_{cls_name}'])
+                    max_metric_idx = self.metric_recorder[f'{metric}_{cls_name}'].index(max_metric) + 1
+                    
+                    msg[metric] = msg.get(metric, [])
+                    msg[metric].append(metric_result)
+                    msg[f'{metric} (Max)'] = msg.get(f'{metric} (Max)', [])
+                    msg[f'{metric} (Max)'].append(f'{max_metric:.3f} ({max_metric_idx:<3d} epoch)')
+                
+                # Tính mAD cho Class hiện tại (Trung bình các metrics)
+                msg['mAD'] = msg.get('mAD', [])
+                msg['mAD'].append(np.mean(current_row_metrics))
+
+                if avg_act:
+                    msg['Name'].append('Avg')
+                    avg_row_metrics = []
+                    for metric in self.metrics:
+                        metric_result_avg = sum(all_class_metrics[metric]) / len(all_class_metrics[metric])
+                        avg_row_metrics.append(metric_result_avg)
+                        self.metric_recorder[f'{metric}_Avg'].append(metric_result_avg)
+                        msg[metric].append(metric_result_avg)
+                        
+                        max_metric_avg = max(self.metric_recorder[f'{metric}_Avg'])
+                        max_idx_avg = self.metric_recorder[f'{metric}_Avg'].index(max_metric_avg) + 1
+                        msg[f'{metric} (Max)'].append(f'{max_metric_avg:.3f} ({max_idx_avg:<3d} epoch)')
+                        
+                        if self.wandb_run:
+                            self.wandb_run.log({f'Test/Avg/{metric}': metric_result_avg / 100.0, 'epoch': self.epoch})
+                    
+                    # Tính mAD cho hàng Average
+                    msg['mAD'].append(np.mean(avg_row_metrics))
 			
 			final_msg = tabulate.tabulate(msg, headers='keys', tablefmt="pipe", floatfmt='.3f', numalign="center", stralign="center")
-			log_msg(self.logger, f'\n{final_msg}')
+			print("\n" + "="*40 + " FINAL TEST SUMMARY " + "="*40)
+            print(f"Epoch: {self.epoch}")
+            print(final_msg)
+            print("="*100 + "\n")
+            log_msg(self.logger, f'\n{final_msg}')
